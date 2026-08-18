@@ -2934,6 +2934,23 @@ export const ALIBABA_TOKEN_PLAN_STATIC_MODELS: readonly ModelSpec<"openai-comple
 		compat: ALIBABA_TOKEN_PLAN_COMPAT,
 	},
 	{
+		id: "deepseek-v4-pro-0813",
+		name: "DeepSeek V4 Pro 0813",
+		api: "openai-completions",
+		provider: "alibaba-token-plan",
+		baseUrl: ALIBABA_TOKEN_PLAN_BASE_URL,
+		reasoning: true,
+		input: ["text"],
+		cost: ALIBABA_TOKEN_PLAN_COST,
+		contextWindow: 1_000_000,
+		maxTokens: 384_000,
+		thinking: {
+			mode: "effort",
+			efforts: [Effort.High, Effort.Max],
+		},
+		compat: ALIBABA_TOKEN_PLAN_COMPAT,
+	},
+	{
 		id: "deepseek-v4-pro",
 		name: "DeepSeek V4 Pro",
 		api: "openai-completions",
@@ -3019,6 +3036,8 @@ const ALIBABA_TOKEN_PLAN_NON_CHAT_MODEL_PREFIXES = [
 	"wan2.7-",
 ] as const;
 
+const ALIBABA_TOKEN_PLAN_STATIC_SUPPLEMENTS = new Set(["deepseek-v4-pro-0813"]);
+
 function isAlibabaTokenPlanChatModelId(id: string): boolean {
 	const normalized = id.trim().toLowerCase();
 	return (
@@ -3046,8 +3065,8 @@ export function alibabaTokenPlanModelManagerOptions(
 		dynamicModelsAuthoritative: true,
 		staticModels: ALIBABA_TOKEN_PLAN_STATIC_MODELS,
 		...(apiKey && {
-			fetchDynamicModels: () =>
-				fetchOpenAICompatibleModels({
+			fetchDynamicModels: async () => {
+				const discovered = await fetchOpenAICompatibleModels({
 					api: "openai-completions",
 					provider: "alibaba-token-plan",
 					baseUrl,
@@ -3087,7 +3106,14 @@ export function alibabaTokenPlanModelManagerOptions(
 						return enriched;
 					},
 					fetch: config?.fetch,
-				}),
+				});
+				if (!discovered) return discovered;
+				const discoveredIds = new Set(discovered.map(model => model.id));
+				const supplements = ALIBABA_TOKEN_PLAN_STATIC_MODELS.filter(
+					model => ALIBABA_TOKEN_PLAN_STATIC_SUPPLEMENTS.has(model.id) && !discoveredIds.has(model.id),
+				).map(model => ({ ...model, baseUrl }));
+				return [...discovered, ...supplements].sort((left, right) => left.id.localeCompare(right.id));
+			},
 		}),
 	};
 }

@@ -19,6 +19,7 @@ describe("QwenCloud Token Plan provider", () => {
 			"qwen3.7-plus",
 			"qwen3.6-flash",
 			"glm-5.2",
+			"deepseek-v4-pro-0813",
 			"deepseek-v4-pro",
 		]);
 
@@ -49,6 +50,17 @@ describe("QwenCloud Token Plan provider", () => {
 	});
 
 	test("bundles curated capabilities before dynamic discovery", () => {
+		expect(getBundledModel<"openai-completions">("alibaba-token-plan", "deepseek-v4-pro-0813")).toMatchObject({
+			reasoning: true,
+			input: ["text"],
+			contextWindow: 1_000_000,
+			maxTokens: 384_000,
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.Low, Effort.High, Effort.Max],
+			},
+		});
+
 		expect(getBundledModel<"openai-completions">("alibaba-token-plan", "qwen3.8-max-preview")).toMatchObject({
 			reasoning: true,
 			input: ["text", "image"],
@@ -106,6 +118,7 @@ describe("QwenCloud Token Plan provider", () => {
 			"deepseek-v3.2",
 			"deepseek-v4-flash",
 			"deepseek-v4-flash-0731",
+			"deepseek-v4-pro-0813",
 			"future-chat-model",
 			"glm-5",
 			"glm-5.1",
@@ -117,6 +130,15 @@ describe("QwenCloud Token Plan provider", () => {
 			"qwen3.7-plus",
 			"qwen3.8-max",
 		]);
+		expect(models?.find(model => model.id === "deepseek-v4-pro-0813")).toMatchObject({
+			provider: "alibaba-token-plan",
+			contextWindow: 1_000_000,
+			maxTokens: 384_000,
+			thinking: {
+				mode: "effort",
+				efforts: [Effort.High, Effort.Max],
+			},
+		});
 		const expectedLimits = [
 			["qwen3.6-plus", 1_000_000, 65_536],
 			["qwen3.8-max", 1_000_000, 131_072],
@@ -193,8 +215,11 @@ describe("QwenCloud Token Plan provider", () => {
 		const models = await options.fetchDynamicModels?.();
 
 		expect(requestedUrl).toBe("https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/models");
-		expect(models?.[0]).toMatchObject({
+		expect(models?.find(model => model.id === "qwen3.7-plus")).toMatchObject({
 			id: "qwen3.7-plus",
+			baseUrl: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+		});
+		expect(models?.find(model => model.id === "deepseek-v4-pro-0813")).toMatchObject({
 			baseUrl: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
 		});
 	});
