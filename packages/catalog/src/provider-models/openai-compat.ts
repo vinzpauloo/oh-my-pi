@@ -2946,7 +2946,7 @@ export const ALIBABA_TOKEN_PLAN_STATIC_MODELS: readonly ModelSpec<"openai-comple
 		maxTokens: 384_000,
 		thinking: {
 			mode: "effort",
-			efforts: [Effort.High, Effort.Max],
+			efforts: [Effort.Low, Effort.High, Effort.Max],
 		},
 		compat: ALIBABA_TOKEN_PLAN_COMPAT,
 	},

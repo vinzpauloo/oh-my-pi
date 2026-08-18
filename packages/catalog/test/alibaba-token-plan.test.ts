@@ -136,7 +136,7 @@ describe("QwenCloud Token Plan provider", () => {
 			maxTokens: 384_000,
 			thinking: {
 				mode: "effort",
-				efforts: [Effort.High, Effort.Max],
+				efforts: [Effort.Low, Effort.High, Effort.Max],
 			},
 		});
 		const expectedLimits = [
