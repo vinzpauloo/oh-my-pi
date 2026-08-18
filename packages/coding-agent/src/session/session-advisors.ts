@@ -100,6 +100,19 @@ import { buildSessionMetadata } from "./session-metadata";
 import type { YieldQueue } from "./yield-queue";
 
 const ADVISOR_CODEX_SSE_MAX_ATTEMPTS = 1;
+
+function advisorTriggerText(messages: readonly AgentMessage[]): string {
+	return JSON.stringify(messages, (key, value) => {
+		if (
+			(key === "data" || key === "thinkingSignature" || key === "providerPayload") &&
+			typeof value === "string" &&
+			value.length > 256
+		) {
+			return `[omitted ${value.length} chars]`;
+		}
+		return value;
+	});
+}
 /** Advisor statistics for the advisor status command. */
 export interface AdvisorStats {
 	configured: boolean;
@@ -159,6 +172,8 @@ interface ActiveAdvisor {
 	thinkingLevel: ThinkingLevel;
 	providerSessionId: string | undefined;
 	fallbackRole: string | undefined;
+	when: RegExp | undefined;
+	triggerCursor: number;
 	retryFallback?: AdvisorRetryFallbackState;
 	retryFallbackPendingSuccess: boolean;
 	signature: string;
@@ -175,6 +190,7 @@ interface AdvisorRuntimeDescriptor {
 	slug: string;
 	model: Model;
 	thinkingLevel: ThinkingLevel;
+	when: RegExp | undefined;
 	signature: string;
 }
 
@@ -337,6 +353,12 @@ export class SessionAdvisors {
 		this.#advisorPrimaryTurnsCompleted++;
 		for (const advisor of this.#advisors) {
 			if (advisor.runtime.disposed) continue;
+			const delta = messages.slice(Math.min(advisor.triggerCursor, messages.length));
+			advisor.triggerCursor = messages.length;
+			if (advisor.when) {
+				advisor.when.lastIndex = 0;
+				if (!advisor.when.test(advisorTriggerText(delta))) continue;
+			}
 			try {
 				advisor.runtime.onTurnEnd(messages, { willContinue });
 			} catch (error) {
@@ -542,6 +564,7 @@ export class SessionAdvisors {
 			a.runtime.reset("conversation-boundary");
 			a.adviseTool.resetDeliveredNotes();
 			a.emissionGuard.reset();
+			a.triggerCursor = this.#host.agent.state.messages.length;
 			this.#attachAdvisorRecorderFeed(a);
 		}
 		this.#advisorPrimaryTurnsCompleted = 0;
@@ -606,6 +629,18 @@ export class SessionAdvisors {
 				model = sel.model;
 				thinkingLevel = concreteThinkingLevel(sel.thinkingLevel);
 			}
+			let when: RegExp | undefined;
+			if (config.when?.trim()) {
+				try {
+					when = new RegExp(config.when, "i");
+				} catch (error) {
+					this.#advisorStatuses.set(slug, { name: config.name, status: "error" });
+					const message = `Advisor "${config.name}": invalid when regex "${config.when}"`;
+					logger.warn(message, { error: String(error) });
+					if (emitWarnings) this.#host.emitNotice("warning", message, "advisor");
+					continue;
+				}
+			}
 			// Clamp the effort against the resolved model. Historically we defaulted
 			// to `ThinkingLevel.Medium` unconditionally, which threw at first stream
 			// on reasoning models that expose no controllable effort surface
@@ -630,6 +665,7 @@ export class SessionAdvisors {
 				slug,
 				model,
 				thinkingLevel: advisorThinkingLevel,
+				when,
 				signature: this.#advisorRuntimeSignature(config, slug, model, advisorThinkingLevel),
 			});
 		}
@@ -645,6 +681,7 @@ export class SessionAdvisors {
 			formatModelStringWithRouting(model),
 			thinkingLevel,
 			config.fallbackRole?.trim() ?? "",
+			config.when?.trim() ?? "",
 			tools,
 			instructions,
 		].join("\u001f");
@@ -693,6 +730,7 @@ export class SessionAdvisors {
 				model: advisorModel,
 				name: advisorName,
 				thinkingLevel: advisorThinkingLevel,
+				when,
 				signature,
 			} = descriptor;
 
@@ -951,6 +989,8 @@ export class SessionAdvisors {
 				thinkingLevel: advisorThinkingLevel,
 				providerSessionId: advisorProviderSessionId,
 				fallbackRole: config.fallbackRole?.trim() || undefined,
+				when,
+				triggerCursor: this.#host.agent.state.messages.length,
 				retryFallbackPendingSuccess: false,
 				signature,
 			};

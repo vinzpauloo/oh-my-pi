@@ -1519,6 +1519,86 @@ describe("AgentSession retry fallback", () => {
 		});
 	});
 
+	it("runs a filtered advisor only when the latest primary delta matches", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) throw new Error("Expected bundled advisor test model");
+		const mainMock = createMockModel({
+			responses: [{ content: ["ordinary response"] }, { content: ["TRIGGER response"] }],
+		});
+		const advisorMock = createMockModel({ responses: [{ content: ["Silent"] }] });
+		const advisorCalled = Promise.withResolvers<void>();
+		let advisorCalls = 0;
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: mainMock.stream,
+		});
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.enabled": false,
+			"advisor.syncBacklog": "1",
+		});
+		settings.setModelRole("advisor", `${model.provider}/${model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+			advisorTools: [],
+			advisorConfigs: [{ name: "filtered", when: "TRIGGER" }],
+			advisorStreamFn: (advisorModel, context, options) => {
+				advisorCalls++;
+				advisorCalled.resolve();
+				return advisorMock.stream(advisorModel, context, options);
+			},
+		});
+		session.setAdvisorEnabled(true);
+
+		await session.prompt("ordinary");
+		await session.waitForIdle();
+		expect(advisorCalls).toBe(0);
+
+		await session.prompt("TRIGGER");
+		await session.waitForIdle();
+		await advisorCalled.promise;
+		expect(advisorCalls).toBe(1);
+	});
+
+	it("disables an advisor whose when regex is invalid", async () => {
+		const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+		if (!model) throw new Error("Expected bundled advisor test model");
+		const mainMock = createMockModel({ responses: [{ content: ["ordinary response"] }] });
+		const advisorMock = createMockModel({ responses: [{ content: ["must not run"] }] });
+		let advisorCalls = 0;
+		const agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] },
+			streamFn: mainMock.stream,
+		});
+		const settings = Settings.isolated({ "compaction.enabled": false, "retry.enabled": false });
+		settings.setModelRole("advisor", `${model.provider}/${model.id}`);
+		session = new AgentSession({
+			agent,
+			sessionManager: SessionManager.inMemory(),
+			settings,
+			modelRegistry,
+			advisorTools: [],
+			advisorConfigs: [{ name: "invalid-filter", when: "(" }],
+			advisorStreamFn: (advisorModel, context, options) => {
+				advisorCalls++;
+				return advisorMock.stream(advisorModel, context, options);
+			},
+		});
+		session.setAdvisorEnabled(true);
+		expect(session.getAdvisorStats().advisors).toEqual([
+			expect.objectContaining({ name: "invalid-filter", status: "error" }),
+		]);
+
+		await session.prompt("ordinary");
+		await session.waitForIdle();
+		expect(advisorCalls).toBe(0);
+	});
+
 	it("ignores late advisor fallback credentials after a session transition", async () => {
 		const mainModel = getBundledModel("openai", "gpt-4o-mini");
 		const advisorPrimary = getBundledModel("anthropic", "claude-sonnet-4-5");

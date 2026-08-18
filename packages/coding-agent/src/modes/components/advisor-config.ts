@@ -293,12 +293,14 @@ export class AdvisorConfigOverlayComponent implements Component {
 		const model = advisor.model?.trim() || this.#defaultModelLabel || "advisor role default";
 		const tools = formatAdvisorTools(advisor.tools, "no tools");
 		const fallbackRole = advisor.fallbackRole?.trim() || "automatic (advisor hint)";
+		const when = advisor.when?.trim() || "every primary turn";
 		const lines = [
 			theme.bold(advisor.name || "(unnamed)"),
 			"",
 			`${theme.fg("dim", "Enabled:")} ${advisor.enabled === false ? "○ off" : "● on"}`,
 			`${theme.fg("dim", "Model:")} ${model}`,
 			`${theme.fg("dim", "Fallback role:")} ${fallbackRole}`,
+			`${theme.fg("dim", "When:")} ${when}`,
 			`${theme.fg("dim", "Tools:")} ${tools}`,
 			"",
 			theme.fg("dim", "Instructions:"),
@@ -362,6 +364,7 @@ export class AdvisorConfigOverlayComponent implements Component {
 			advisor.name === "default" &&
 			!advisor.model?.trim() &&
 			!advisor.fallbackRole?.trim() &&
+			!advisor.when?.trim() &&
 			advisor.tools === undefined &&
 			!advisor.instructions?.trim() &&
 			advisor.enabled !== false
@@ -371,8 +374,9 @@ export class AdvisorConfigOverlayComponent implements Component {
 	#advisorSummary(advisor: AdvisorConfig): string {
 		const model = advisor.model?.trim() || this.#defaultModelLabel || "advisor role default";
 		const fallbackRole = advisor.fallbackRole?.trim() || "automatic";
+		const when = advisor.when?.trim() || "always";
 		const tools = formatAdvisorTools(advisor.tools, "no tools");
-		return `${model} · fallback ${fallbackRole} · ${tools}`;
+		return `${model} · fallback ${fallbackRole} · ${when} · ${tools}`;
 	}
 
 	#showList(): void {

@@ -5,6 +5,7 @@
 ### Added
 
 - Added per-advisor `fallbackRole` support in `WATCHDOG.yml`, allowing named advisors to retain independent retry fallback chains even when their primary models overlap.
+- Added optional per-advisor `when` filters so specialized reviewers can run only on matching primary-turn deltas while omitted filters remain always-on.
 
 ## [17.3.7] - 2026-08-17
 

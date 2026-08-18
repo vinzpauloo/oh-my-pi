@@ -37,6 +37,7 @@ describe("discoverAdvisorConfigs", () => {
 			"  - name: Architecture",
 			"    model: x-ai/grok-code-fast:high",
 			"    fallbackRole: plan",
+			"    when: edit|write",
 			"    instructions: Watch module boundaries.",
 			"  - name: Security Reviewer",
 			"    tools: [read, definitely-not-a-tool]",
@@ -51,6 +52,7 @@ describe("discoverAdvisorConfigs", () => {
 		// resolution happens later in the session, not here.
 		expect(arch.model).toBe("x-ai/grok-code-fast:high");
 		expect(arch.fallbackRole).toBe("plan");
+		expect(arch.when).toBe("edit|write");
 		expect(arch.instructions).toBe("Watch module boundaries.");
 		expect(sec.name).toBe("Security Reviewer");
 		expect(sec.model).toBeUndefined();
@@ -211,6 +213,7 @@ describe("WATCHDOG.yml file round-trip", () => {
 				name: "Architecture",
 				model: "x-ai/grok-code-fast:high",
 				fallbackRole: "plan",
+				when: "edit|write",
 				instructions: "Watch module boundaries.\nReport coupling.",
 			},
 			{ name: "Security", tools: ["read", "grep"] },
@@ -232,6 +235,7 @@ describe("WATCHDOG.yml file round-trip", () => {
 		expect(text).toContain("advisors:");
 		expect(text).not.toMatch(/^\{/);
 		expect(text).toContain("    fallbackRole: plan");
+		expect(text).toContain("    when: edit|write");
 		expect(text).toContain('instructions: |2-\n  Shared baseline.\n  \n  Second line with: a colon and "quotes".');
 		expect(text).toContain("    instructions: |2-\n      Watch module boundaries.\n      Report coupling.");
 		expect(text).not.toContain("\\n");

@@ -22,6 +22,8 @@ export interface AdvisorConfig {
 	model?: string;
 	/** Explicit retry fallback chain owner. Omitted uses normal resolution with an `advisor` role hint. */
 	fallbackRole?: string;
+	/** Optional case-insensitive regex; the advisor runs only when the latest primary-turn delta matches. */
+	when?: string;
 	tools?: string[];
 	instructions?: string;
 	/** Per-advisor on/off toggle (default `true`). When `false`, the advisor
@@ -55,6 +57,7 @@ const advisorEntrySchema = type({
 	name: "string",
 	"model?": "string",
 	"fallbackRole?": "string",
+	"when?": "string",
 	"tools?": "string[]",
 	"instructions?": "string",
 	"enabled?": "boolean",
@@ -174,6 +177,7 @@ export async function discoverAdvisorConfigs(cwd: string, agentDir?: string): Pr
 				name: entry.name,
 				model: entry.model?.trim() || undefined,
 				fallbackRole: entry.fallbackRole?.trim() || undefined,
+				when: entry.when?.trim() || undefined,
 				tools: filterAdvisorTools(entry.tools, item.path),
 				instructions,
 				enabled: entry.enabled,
@@ -261,6 +265,7 @@ export async function loadWatchdogConfigFile(filePath: string): Promise<Watchdog
 		const advisor: AdvisorConfig = { name: a.name };
 		if (a.model?.trim()) advisor.model = a.model;
 		if (a.fallbackRole?.trim()) advisor.fallbackRole = a.fallbackRole;
+		if (a.when?.trim()) advisor.when = a.when;
 		if (a.tools !== undefined) advisor.tools = [...a.tools];
 		if (a.instructions?.trim()) advisor.instructions = a.instructions;
 		if (a.enabled !== undefined) advisor.enabled = a.enabled;
@@ -309,6 +314,7 @@ export function serializeWatchdogConfig(doc: WatchdogConfigDoc): string {
 			lines.push(`  - name: ${YAML.stringify(advisor.name)}`);
 			if (advisor.model?.trim()) lines.push(`    model: ${YAML.stringify(advisor.model)}`);
 			if (advisor.fallbackRole?.trim()) lines.push(`    fallbackRole: ${YAML.stringify(advisor.fallbackRole)}`);
+			if (advisor.when?.trim()) lines.push(`    when: ${YAML.stringify(advisor.when)}`);
 			if (advisor.tools !== undefined) {
 				if (advisor.tools.length === 0) {
 					lines.push("    tools: []");

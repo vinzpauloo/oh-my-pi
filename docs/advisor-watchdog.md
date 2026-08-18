@@ -268,6 +268,7 @@ advisors:
     enabled: true
     model: anthropic/claude-sonnet-4-5:medium
     fallbackRole: plan
+    when: \"(edit|write|architecture|design)\"
     tools: [read, grep, glob]
     instructions: |
       Watch cross-module coupling and public-API growth.
@@ -287,6 +288,7 @@ Fields:
 - `advisors[].enabled`: optional per-advisor switch, default `true`. `false` leaves the advisor visible as paused in status/configuration.
 - `advisors[].model`: optional model selector with optional `:level` thinking suffix (e.g. `x-ai/grok-code-fast:high`). Omitted → the advisor uses `modelRoles.advisor`.
 - `advisors[].fallbackRole`: optional `retry.fallbackChains` key that explicitly owns recovery after same-provider credential rotation is exhausted. Omitted → normal chain resolution, where exact model/provider keys retain precedence and `advisor` is only the role hint. This lets advisors that share a primary model opt into independent fallback ordering.
+- `advisors[].when`: optional case-insensitive regular expression matched against only the latest primary-turn delta. Non-matching turns advance the filter cursor without invoking that advisor; when a later turn matches, the advisor receives its accumulated unseen context.
 - `advisors[].tools`: optional list of built-in tool names to grant. Omitted → the default `read`/`grep`/`glob` subset; explicit `[]` → no investigative tools. Any name in [`BUILTIN_TOOL_NAMES`](../packages/coding-agent/src/tools/builtin-names.ts) is accepted, including mutating tools. Legacy aliases (`search`→`grep`, `find`→`glob`) are normalized. Unknown names are dropped with a warning; if that leaves a nonempty input with no valid names, the implementation currently treats the result as omitted and uses the default subset.
 - `advisors[].instructions`: this advisor's specialization, appended after the shared baseline. Both instruction fields expand `@path` imports like `WATCHDOG.md`.
 
