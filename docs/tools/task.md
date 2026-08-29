@@ -101,7 +101,7 @@ Artifacts and side channels:
     - caller signal, wall-clock timeout, or internal hard abort → registry status `aborted`, session disposed — terminal;
     - soft-request-budget abort on a non-isolated kept-alive agent → treated as resumable: the agent becomes `idle` and may receive a follow-up/revival;
     - isolated run → status `parked` without a reviver (workspace is merged + cleaned, so the session is not revivable; transcript stays readable via `history://`), then session disposed and detached;
-    - everything else (success and failure alike) → status `idle` with the live session attached, and `AgentLifecycleManager.global().adopt(id, { idleTtlMs, revive })` arms the park timer. The reviver reopens the session JSONL.
+    - everything else (success and failure alike) → status `idle` with the live session attached, and the parent-paired `AgentLifecycleManager` (or `AgentLifecycleManager.global()` when unmanaged) adopts it (`lifecycleManager.adopt(id, { idleTtlMs, revive })`), arming the park timer. The reviver reopens the session JSONL.
 16. Lifecycle thereafter: `idle` agents are parked after `task.agentIdleTtlMs` (session disposed; `AgentRef` + session file retained); messaging (`hub`) or the Agent Hub revives them back to `idle`. `"Main"` is never parked.
 
 ## Modes / Variants
@@ -128,9 +128,9 @@ Artifacts and side channels:
   - Isolation backends run through the `pi-natives` PAL (`crates/pi-iso`): kernel `overlay` with `fuse-overlayfs`/`fusermount[3]` fallback on Linux, APFS/Btrfs/ZFS/reflink clones, ProjFS on Windows, recursive copy as last resort.
   - Git operations for baseline capture, patch apply, worktrees, branches, stash, cherry-pick, commits.
 - Session state (transcript, memory, jobs, checkpoints, registries)
-  - Creates child `AgentSession` instances with isolated settings snapshots; finished sessions stay registered in the process-global `AgentRegistry` as `idle`/`parked` until process teardown or explicit release.
+  - Creates child `AgentSession` instances with isolated settings snapshots; finished sessions stay registered in the session's paired `AgentRegistry` as `idle`/`parked` until process teardown or explicit release.
   - With `async.enabled=true`, registers one async job per spawn in `session.asyncJobManager`; completion is injected into the parent as an async-result message.
-  - Arms idle-TTL timers in `AgentLifecycleManager` (unref'd; they never hold the process open).
+  - Arms idle-TTL timers in the parent-paired `AgentLifecycleManager` (unref'd; they never hold the process open).
   - Emits `task:subagent:event`, `task:subagent:progress`, and `task:subagent:lifecycle` on the parent event bus.
   - Allocates session-scoped output ids through `AgentOutputManager` so `agent://` stays unique across invocations.
   - Shares the parent `local://` root and `ArtifactManager` with subagents.

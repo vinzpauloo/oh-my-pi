@@ -16,6 +16,7 @@ import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 function activeGoalState(): GoalModeState {
 	const now = Date.now();
@@ -478,12 +479,19 @@ describe("AgentSession mid-run threshold compaction", () => {
 			extensionRuntime,
 			"assistant-display-variant",
 		);
+		const sessionManager = SessionManager.inMemory();
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"assistant-display-variant",
+		);
 		const extensionRunner = new ExtensionRunner(
 			[extension],
 			extensionRuntime,
 			tempDir.path(),
-			SessionManager.inMemory(),
+			sessionManager,
 			sharedModelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
 		);
 		const { session, observedContexts } = await createHarness({}, { extensionRunner });
 		const compactSpy = mockCompaction("MID-RUN-COMPACTED-WITH-CONTENT-VARIANT");

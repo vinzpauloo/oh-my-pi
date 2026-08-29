@@ -153,6 +153,8 @@ Also exposed:
 
 Handlers and tool `execute` receive `ctx` with:
 
+- `agent` (`readonly AgentPublicIdentity` — immutable public identity of the executing agent)
+- `agentLifecycle` (`readonly AgentLifecycleObserver` — root lifecycle snapshot and subscription stream)
 - `ui`
 - `hasUI`
 - `cwd`
@@ -168,6 +170,127 @@ Handlers and tool `execute` receive `ctx` with:
 - `getSystemPrompt()`
 - `memory` (optional structured memory runtime — status/search/save across the configured backend)
 - `setInterval(fn, ms, ...args)` / `setTimeout(fn, ms, ...args)` / `clearTimer(timer)` — managed timers (see below)
+
+### Agent identity (`ctx.agent`)
+
+`ctx.agent` provides an immutable, versioned public identity (`AgentPublicIdentity`) for the agent executing the current turn or extension handler:
+
+```ts
+export interface AgentPublicIdentity {
+  readonly schemaVersion: 1;
+  readonly agentId: string;
+  readonly rootAgentId: string;
+  readonly parentAgentId: string | null;
+  readonly currentSessionId: string;
+  readonly kind: "main" | "sub";
+  readonly label: string;
+  readonly inspectLocator: string;
+}
+```
+
+Key identity contracts:
+
+- `schemaVersion: 1` defines the stable identity schema.
+- `agentId` is the unique identifier for this agent.
+- `rootAgentId` identifies the root agent of the execution hierarchy (`rootAgentId === agentId` for top-level sessions).
+- `parentAgentId` identifies the direct parent agent, or `null` for the root agent.
+- `currentSessionId` identifies the active session running this turn.
+- `kind` indicates the agent's role (`"main"` or `"sub"`). Advisor `ExtensionContext` integration is deferred/out of BP-S1 (advisors remain internal to the agent loop).
+- `label` is the human-readable display label.
+- `inspectLocator` is an opaque locator URI (e.g. `history://${agentId}`) for transcript and artifact inspection. Consumers must treat it as opaque and avoid parsing or depending on internal URL structure.
+
+### Root lifecycle observation (`ctx.agentLifecycle`)
+
+`ctx.agentLifecycle` exposes the `AgentLifecycleObserver` interface, enabling extensions to inspect the atomic lifecycle state of the entire root hierarchy and subscribe to live state transitions:
+
+```ts
+export interface AgentLifecycleObserver {
+  subscribe(listener: AgentLifecycleListener): AgentLifecycleSubscription;
+}
+```
+
+Calling `subscribe(listener)` immediately returns an `AgentLifecycleSubscription` containing an initial atomic `snapshot` and an `unsubscribe()` method:
+
+```ts
+export interface AgentLifecycleSubscription {
+  readonly snapshot: AgentLifecycleSnapshot;
+  unsubscribe(): void;
+}
+```
+
+#### Snapshot and transition types
+
+```ts
+export type AgentLifecycleState = "active" | "parked" | "released" | "aborted";
+
+export type AgentLifecycleTransitionType =
+  | "registered"
+  | "parked"
+  | "revived"
+  | "released"
+  | "aborted";
+
+export type AgentLifecycleReason =
+  | "session-created"
+  | "idle-timeout"
+  | "cold-revive"
+  | "release"
+  | "process-shutdown"
+  | "hard-abort";
+
+export interface AgentLifecycleEntry {
+  readonly agent: AgentPublicIdentity;
+  readonly state: AgentLifecycleState;
+  readonly sequence: number;
+  readonly revivable: boolean;
+  readonly terminal: boolean;
+}
+
+export interface AgentLifecycleSnapshot {
+  readonly schemaVersion: 1;
+  readonly rootAgentId: string;
+  readonly version: number;
+  readonly agents: readonly AgentLifecycleEntry[];
+}
+
+export interface AgentLifecycleTransition {
+  readonly schemaVersion: 1;
+  readonly rootAgentId: string;
+  readonly version: number;
+  readonly sequence: number;
+  readonly transition: AgentLifecycleTransitionType;
+  readonly agent: AgentPublicIdentity;
+  readonly from: AgentLifecycleState | null;
+  readonly to: AgentLifecycleState;
+  readonly reason: AgentLifecycleReason;
+  readonly revivable: boolean;
+  readonly terminal: boolean;
+}
+```
+
+#### Lifecycle semantics and ordering
+
+- **Atomic snapshot + stream**: `subscribe()` yields an immediate immutable `snapshot` of all known agents under the current root, followed by sequential `AgentLifecycleTransition` events pushed to the listener for subsequent transitions.
+- **Manager-owned versions and sequences**:
+  - `snapshot.version` and `transition.version` represent the monotonic version of the root lifecycle state (incremented on every transition across the tree).
+  - `entry.sequence` and `transition.sequence` represent the monotonic per-agent sequence number (incremented whenever that specific agent transitions).
+- **State transitions & reasons**:
+  - `registered`: Agent session initialized (`from: null`, `to: "active"`, `reason: "session-created"`, `terminal: false`, `revivable: false`).
+  - `parked`: Non-terminal idle suspension (`from: "active"`, `to: "parked"`, `reason: "idle-timeout"`, `terminal: false`). The `revivable` entry boolean indicates whether the parked agent can be resumed (`revivable: true` for standard kept-alive subagents, or `revivable: false` for isolated parked work without a live reviver). The in-memory session is detached and unmounted while descriptor/transcript metadata remain observable.
+  - `revived`: Non-terminal resurrection (`from: "parked"`, `to: "active"`, `reason: "cold-revive"`, `terminal: false`, `revivable: true`).
+  - `released`: Terminal conclusion (`to: "released"`, `terminal: true`, `revivable: false`). Reasons include explicit teardown (`"release"`) or graceful process shutdown (`"process-shutdown"`).
+  - `aborted`: Terminal hard abort (`to: "aborted"`, `reason: "hard-abort"`, `terminal: true`, `revivable: false`).
+- **Nonterminal park vs. terminal release**: `parked` agents retain non-terminal status (`terminal: false`), with `revivable` as the entry boolean reflecting resume capability (which is `false` for isolated parked work). In contrast, `released` and `aborted` states are terminal (`terminal: true`, `revivable: false`).
+- **Retained terminal entries**: Terminal agent entries are not dropped or pruned from `snapshot.agents`; they remain present with `terminal: true` to preserve complete auditability and lineage across the lifecycle of the root tree.
+- **Forward compatibility**: Consumers should write pattern matches and switch statements with `default` handling for unknown future transition types, states, or reasons.
+- **Session-local interaction isolation**: Interactive prompts, asks, and dialogs remain strictly session-local; interactive results are never published into the root lifecycle stream.
+
+#### SDK embedder injection
+
+SDK consumers using `createAgentSession` can inject custom lifecycle infrastructure:
+
+- `options.agentRegistry`: Custom `AgentRegistry` instance (defaults to `AgentRegistry.global()`).
+- `options.agentLifecycle`: Custom `AgentLifecycleManager` paired with the registry. When a private `agentRegistry` is provided without `agentLifecycle`, a paired manager is automatically constructed. If both are explicitly provided, the manager must manage the specified registry.
 
 ### Background work (`ctx.setInterval` / `ctx.setTimeout`)
 

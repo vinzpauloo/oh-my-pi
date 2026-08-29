@@ -17,6 +17,7 @@ import type { Settings } from "../../config/settings";
 import type { LocalProtocolOptions } from "../../internal-urls/local-protocol";
 import type { MemoryRuntimeContext } from "../../memory-backend";
 import { type Theme, theme } from "../../modes/theme/theme";
+import type { AgentLifecycleObserver, AgentPublicIdentity } from "../../registry/agent-public-contract";
 import type { AsyncJobSnapshot } from "../../session/agent-session";
 import type { SessionManager } from "../../session/session-manager";
 import { addFileDeleteFallback, addFileWriteFallback } from "../../tools/file-write-fallback";
@@ -602,6 +603,8 @@ export class ExtensionRunner {
 		_initialCwd: string,
 		private readonly sessionManager: SessionManager,
 		private readonly modelRegistry: ModelRegistry,
+		private readonly agentIdentity: AgentPublicIdentity,
+		private readonly agentLifecycleObserver: AgentLifecycleObserver,
 		getMemory?: () => MemoryRuntimeContext | undefined,
 		private readonly settings?: Settings,
 		private readonly localProtocolOptions?: LocalProtocolOptions,
@@ -1145,6 +1148,8 @@ export class ExtensionRunner {
 	): ExtensionContext {
 		const getModel = model ? () => model : this.#getModel;
 		return {
+			agent: this.agentIdentity,
+			agentLifecycle: this.agentLifecycleObserver,
 			ui: this.#uiContext,
 			mode: this.#mode,
 			getContextUsage: () => this.#getContextUsageFn(),

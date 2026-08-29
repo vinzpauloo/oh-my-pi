@@ -30,6 +30,7 @@ import {
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getProjectAgentDir, logger, TempDir } from "@oh-my-pi/pi-utils";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 const HANG_EXTENSION_SRC = `
 	export default function(pi) {
@@ -81,12 +82,18 @@ describe("issue #2600 - session_shutdown handler timeout", () => {
 
 		const sessionManager = SessionManager.inMemory();
 		const result = await discoverAndLoadExtensions([extensionsDir, ...hangExtensionPaths], tempDir.path());
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"shutdown-timeout",
+		);
 		const runner = new ExtensionRunner(
 			result.extensions,
 			result.runtime,
 			tempDir.path(),
 			sessionManager,
 			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
 		);
 		return {
 			runner,

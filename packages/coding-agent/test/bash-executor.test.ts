@@ -438,6 +438,7 @@ exit 64
 			env: {
 				PATH: Bun.env.PATH ?? "",
 				HOME: shellDir,
+				ZDOTDIR: shellDir,
 			},
 			prefix: undefined,
 		});

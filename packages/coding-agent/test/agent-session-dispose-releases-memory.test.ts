@@ -16,6 +16,7 @@ import { FileSessionStorage } from "@oh-my-pi/pi-coding-agent/session/session-st
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 // Regression: a keep-alive subagent's AgentSession is disposed at park() but
 // stays reachable through the lifecycle adoption record's reviver closure
@@ -204,7 +205,19 @@ describe("AgentSession dispose releases retained memory", () => {
 			runtime,
 			"block-message-end",
 		);
-		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"block-message-end",
+		);
+		const extensionRunner = new ExtensionRunner(
+			[extension],
+			runtime,
+			tempDir.path(),
+			sessionManager,
+			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
+		);
 
 		const current = new AgentSession({
 			agent,
@@ -300,7 +313,19 @@ describe("AgentSession dispose releases retained memory", () => {
 			runtime,
 			"slow-message-end",
 		);
-		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"slow-message-end",
+		);
+		const extensionRunner = new ExtensionRunner(
+			[extension],
+			runtime,
+			tempDir.path(),
+			sessionManager,
+			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
+		);
 		const current = new AgentSession({
 			agent,
 			sessionManager,
@@ -390,7 +415,19 @@ describe("AgentSession dispose releases retained memory", () => {
 			runtime,
 			"slow-message-end-file",
 		);
-		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"slow-message-end-file",
+		);
+		const extensionRunner = new ExtensionRunner(
+			[extension],
+			runtime,
+			tempDir.path(),
+			sessionManager,
+			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
+		);
 		const current = new AgentSession({
 			agent,
 			sessionManager,
@@ -563,7 +600,19 @@ describe("AgentSession dispose releases retained memory", () => {
 			runtime,
 			"block-agent-end",
 		);
-		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"block-agent-end",
+		);
+		const extensionRunner = new ExtensionRunner(
+			[extension],
+			runtime,
+			tempDir.path(),
+			sessionManager,
+			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
+		);
 		const current = new AgentSession({
 			agent,
 			sessionManager,

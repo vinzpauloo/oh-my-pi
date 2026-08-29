@@ -525,6 +525,8 @@ export interface CreateAgentSessionOptions {
 	agentDisplayName?: string;
 	/** Optional shared agent registry for IRC routing. Default: AgentRegistry.global(). */
 	agentRegistry?: AgentRegistry;
+	/** Lifecycle manager paired with {@link agentRegistry}. Defaults to the global manager or a private manager for a private registry. */
+	agentLifecycle?: AgentLifecycleManager;
 	/**
 	 * Registry generation authorized for this creation. `null` requires the id
 	 * to be absent; an AgentRef allows a parked revival to reuse only that ref.
@@ -639,6 +641,8 @@ export type { MCPManager, MCPServerConfig, MCPServerConnection, MCPToolsLoadResu
 // Agent registry: pass a private instance per `createAgentSession` when
 // embedding several concurrent top-level sessions in one process (the default
 // global registry admits only one "Main" per process generation).
+export { AgentLifecycleManager } from "./registry/agent-lifecycle";
+export type * from "./registry/agent-public-contract";
 export { type AgentRef, AgentRegistry, MAIN_AGENT_ID } from "./registry/agent-registry";
 export type { Tool } from "./tools";
 export { buildDirectoryTree, buildWorkspaceTree, type DirectoryTree, type WorkspaceTree } from "./workspace-tree";
@@ -1616,27 +1620,48 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	const scopedAsyncJobManager = asyncJobManager ?? (options.parentTaskPrefix ? AsyncJobManager.instance() : undefined);
 
 	const agentRegistry = options.agentRegistry ?? AgentRegistry.global();
+	const ownsAgentLifecycle = options.agentLifecycle === undefined && agentRegistry !== AgentRegistry.global();
+	const agentLifecycle =
+		options.agentLifecycle ??
+		(agentRegistry === AgentRegistry.global()
+			? AgentLifecycleManager.global()
+			: new AgentLifecycleManager(agentRegistry));
+	if (!agentLifecycle.manages(agentRegistry)) {
+		throw new Error("agentLifecycle must manage the same AgentRegistry supplied to createAgentSession.");
+	}
 	const resolvedAgentId = options.agentId ?? options.parentTaskPrefix ?? MAIN_AGENT_ID;
 	const resolvedAgentDisplayName =
 		options.agentDisplayName ?? ((options.taskDepth ?? 0) > 0 || options.parentTaskPrefix ? "sub" : "main");
 	const agentKind = (options.taskDepth ?? 0) > 0 || options.parentTaskPrefix ? ("sub" as const) : ("main" as const);
+	const publicAgentIdentity = agentLifecycle.createIdentity({
+		agentId: resolvedAgentId,
+		parentAgentId: options.parentAgentId,
+		expectedRef: options.expectedAgentRef ?? undefined,
+		currentSessionId: sessionManager.getSessionId(),
+		kind: agentKind,
+		label: resolvedAgentDisplayName,
+	});
+	if (options.expectedAgentRef && !agentLifecycle.bootstrapParked(publicAgentIdentity, options.expectedAgentRef)) {
+		throw new Error(`Agent "${resolvedAgentId}" parked lifecycle bootstrap was rejected.`);
+	}
+	const agentLifecycleObserver = agentLifecycle.observer(publicAgentIdentity);
 	let registeredAgentRef: AgentRef | undefined;
 	/**
 	 * Forget the agent ref on teardown — unless it is a retained terminal ref.
 	 * Parking disposes the session but keeps the ref addressable (history://,
-	 * revive); a hard kill leaves it as a terminal `aborted` tombstone. Both are
-	 * detached (session === null) by the time dispose runs, per the AgentRef
-	 * invariant, so preserving them never keeps a disposed session reachable — an
-	 * aborted ref that still holds a live session is a bug and is unregistered
-	 * rather than handed to ensureLive. Only process teardown / a plain release
-	 * unregisters.
+	 * revive); a hard kill leaves it as a terminal `aborted` tombstone.
 	 */
-	const unregisterUnlessParked = (): void => {
+	const unregisterUnlessParked = (reason: "release" | "process-shutdown" = "release"): void => {
 		const ref = registeredAgentRef;
-		if (!ref || agentRegistry.get(resolvedAgentId) !== ref) return;
+		if (!ref) return;
+		if (agentRegistry.get(resolvedAgentId) !== ref) {
+			agentLifecycle.commitReleased(ref, reason);
+			return;
+		}
 		if (ref.status === "parked" || (ref.status === "aborted" && !ref.session)) return;
-		if (AgentLifecycleManager.global().isParking(resolvedAgentId, ref)) return;
-		agentRegistry.unregister(resolvedAgentId, ref);
+		if (agentLifecycle.isParking(resolvedAgentId, ref)) return;
+		if (agentLifecycle.isReleasing(resolvedAgentId, ref)) return;
+		if (agentRegistry.unregister(resolvedAgentId, ref)) agentLifecycle.commitReleased(ref, reason);
 	};
 	const evalKernelOwnerId = `agent-session:${Snowflake.next()}`;
 
@@ -1711,11 +1736,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			getAgentId: () => resolvedAgentId,
 			getToolByName: name => session?.getToolByName(name),
 			agentRegistry,
-			// The global lifecycle releases through AgentRegistry.global(); wiring it
-			// onto a caller-supplied registry would report a cancel while releasing an
-			// unrelated global ref. With no lifecycle, hub cancel falls back to
-			// dispose + unregister on the session's own registry.
-			agentLifecycle: options.agentRegistry ? undefined : () => AgentLifecycleManager.global(),
+			agentLifecycle: () => agentLifecycle,
 			getSessionSpawns: () => options.spawns ?? "*",
 			getModelString: () => (hasExplicitModel && model ? formatModelString(model) : undefined),
 			getActiveModelString,
@@ -2558,6 +2579,8 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			cwd,
 			sessionManager,
 			modelRegistry,
+			publicAgentIdentity,
+			agentLifecycleObserver,
 			() => (hasSession ? createSessionMemoryRuntimeContext(session, agentDir, cwd) : undefined),
 			settings,
 			localProtocolOptions,
@@ -3046,8 +3069,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// The reclaim is gated by the lifecycle owner and only touches the
 			// registry it manages; the corpse's transcript stays at history://.
 			const stale = agentRegistry.get(resolvedAgentId);
-			const lifecycle = AgentLifecycleManager.global();
-			if (stale && lifecycle.manages(agentRegistry) && (await lifecycle.reclaimDeadCorpse(resolvedAgentId, stale))) {
+			if (stale && (await agentLifecycle.reclaimDeadCorpse(resolvedAgentId, stale))) {
 				registeredAgentRef = agentRegistry.registerIfAvailable(registrationInput, null);
 			}
 		}
@@ -3626,6 +3648,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			throw new Error(`Agent "${resolvedAgentId}" was replaced during session initialization.`);
 		}
 		hasRegistered = true;
+		const lifecycleCommitted =
+			options.expectedAgentRef && registeredAgentRef === options.expectedAgentRef
+				? agentLifecycle.commitRevived(publicAgentIdentity, registeredAgentRef)
+				: agentLifecycle.commitRegistered(publicAgentIdentity, registeredAgentRef);
+		if (!lifecycleCommitted) {
+			throw new Error(`Agent "${resolvedAgentId}" lifecycle registration was rejected.`);
+		}
 		// MCP notification bridge cleanup — assigned when the bridge is wired below,
 		// invoked from the dispose wrapper AND registered as a postmortem so both
 		// explicit-dispose (SDK embedders that reuse the process across sessions) and
@@ -3644,10 +3673,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					// AgentSession.dispose() would otherwise set its guards.
 					session.beginDispose();
 					if (agentKind === "main") {
-						// Top-level teardown owns the global agent lifecycle: park timers,
-						// adopted subagent sessions, revivers. Tear it down while shared
-						// resources (kernels, MCP, LSP) are still live. Subagent disposal
-						// must NOT touch the global lifecycle.
 						const vibeRegistry = VibeSessionRegistry.global();
 						const vibeParentSession = {
 							getAgentId: () => resolvedAgentId,
@@ -3659,9 +3684,24 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 							getActiveModelString,
 						};
 						await vibeRegistry.suspendScope(vibeRegistry.ownerScope(vibeParentSession), scopedAsyncJobManager);
-						await AgentLifecycleManager.global().dispose();
 					}
-					await originalDispose();
+					if (agentKind === "main" || ownsAgentLifecycle) {
+						// Keep the exact root ref out of the manager's child sweep:
+						// its session must shut down before its release is published,
+						// while the manager is still observing the registry.
+						await agentLifecycle.dispose({
+							ownerRef: registeredAgentRef,
+							beforeUnsubscribe: async () => {
+								try {
+									await originalDispose();
+								} finally {
+									unregisterUnlessParked("process-shutdown");
+								}
+							},
+						});
+					} else {
+						await originalDispose();
+					}
 				} finally {
 					unregisterUnlessParked();
 					unsubscribeCredentialDisabled?.();

@@ -12,6 +12,7 @@ import { ExtensionRuntime } from "@oh-my-pi/pi-coding-agent/extensibility/extens
 import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 interface SessionDirs {
 	cwd: string;
@@ -515,7 +516,19 @@ describe("createAgentSession credential_disabled subscription", () => {
 			};
 			const runtime = new ExtensionRuntime();
 			const sessionManager = SessionManager.inMemory();
-			const runner = new ExtensionRunner([throwingExtension], runtime, dirs.cwd, sessionManager, modelRegistry);
+			const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+				sessionManager,
+				"credential-disabled-bridge",
+			);
+			const runner = new ExtensionRunner(
+				[throwingExtension],
+				runtime,
+				dirs.cwd,
+				sessionManager,
+				modelRegistry,
+				agentIdentity,
+				agentLifecycleObserver,
+			);
 
 			// 1. Buffer the event BEFORE initialize so it lands in #pendingCredentialDisabled.
 			await runner.emitCredentialDisabled({ provider: "anthropic", disabledCause: "test" });

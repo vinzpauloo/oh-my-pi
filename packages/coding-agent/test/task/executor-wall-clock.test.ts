@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { LoadExtensionsResult } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
+import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { CreateAgentSessionOptions, CreateAgentSessionResult } from "@oh-my-pi/pi-coding-agent/sdk";
 import * as sdkModule from "@oh-my-pi/pi-coding-agent/sdk";
@@ -9,6 +10,7 @@ import type { AgentSession, AgentSessionEvent, PromptOptions } from "@oh-my-pi/p
 import { runSubprocess } from "@oh-my-pi/pi-coding-agent/task/executor";
 import type { AgentDefinition } from "@oh-my-pi/pi-coding-agent/task/types";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
+import { logger } from "@oh-my-pi/pi-utils";
 
 /**
  * Contract: when `task.maxRuntimeMs` is set, a subagent whose inference call
@@ -73,8 +75,14 @@ function mockCreateAgentSession(session: AgentSession) {
 }
 
 describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
+	beforeEach(() => {
+		AgentLifecycleManager.resetGlobalForTests();
+		AgentRegistry.resetGlobalForTests();
+	});
+
 	afterEach(() => {
 		vi.restoreAllMocks();
+		AgentLifecycleManager.resetGlobalForTests();
 		AgentRegistry.resetGlobalForTests();
 	});
 
@@ -167,6 +175,60 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 		expect(result.abortReason).toBeUndefined();
 	});
 
+	it("subagent launch timing", async () => {
+		const timingLog = Promise.withResolvers<Record<string, unknown>>();
+		vi.spyOn(logger, "debug").mockImplementation((message, details) => {
+			if (message === "subagent launch timing") {
+				timingLog.resolve((details ?? {}) as Record<string, unknown>);
+			}
+		});
+		const fastSession: Partial<AgentSession> = {
+			setIrcWakeTurnObserver: () => {},
+			subscribeRunState: () => () => {},
+			state: { messages: [] } as never,
+			agent: { state: { systemPrompt: ["test"] } } as never,
+			extensionRunner: undefined as never,
+			sessionManager: { appendSessionInit: () => {} } as never,
+			getActiveToolNames: () => ["read", "yield"],
+			getEnabledToolNames: () => ["read", "yield"],
+			setActiveToolsByName: async () => {},
+			subscribe: listener => {
+				queueMicrotask(() => {
+					listener({
+						type: "tool_execution_end",
+						toolCallId: "tool-launch-timing",
+						toolName: "yield",
+						result: {
+							content: [{ type: "text", text: "Result submitted." }],
+							details: { status: "success", data: { ok: true } },
+						},
+						isError: false,
+					} as AgentSessionEvent);
+				});
+				return () => {};
+			},
+			prompt: async () => true,
+			waitForIdle: async () => {},
+			getLastAssistantMessage: () => undefined,
+			abort: async () => {},
+			dispose: async () => {},
+		};
+		mockCreateAgentSession(fastSession as AgentSession);
+
+		const result = await runSubprocess({
+			...baseOptions,
+			id: "subagent-launch-timing",
+			settings: Settings.isolated({ "task.maxRuntimeMs": 0 }),
+		});
+		const details = await timingLog.promise;
+
+		expect(result.exitCode).toBe(0);
+		expect(Number.isFinite(details.createSessionMs as number)).toBe(true);
+		expect(Number.isFinite(details.readyMs as number)).toBe(true);
+		expect(details.createSessionMs as number).toBeGreaterThanOrEqual(0);
+		expect(details.readyMs as number).toBeGreaterThanOrEqual(0);
+	});
+
 	it("aborts before prompting when the timer fires during session setup", async () => {
 		// Delay createAgentSession longer than maxRuntimeMs so the wall-clock
 		// timer fires while the executor is still doing async setup, well before
@@ -206,8 +268,8 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 	});
 
 	it("a cancelled late initializer cannot replace a newer same-id worker", async () => {
-		AgentRegistry.resetGlobalForTests();
-		const registry = AgentRegistry.global();
+		const registry = new AgentRegistry();
+		const lifecycle = new AgentLifecycleManager(registry);
 		const creationGate = Promise.withResolvers<void>();
 		const creationStarted = Promise.withResolvers<CreateAgentSessionOptions>();
 		const lateDisposed = Promise.withResolvers<void>();
@@ -244,6 +306,8 @@ describe("runSubprocess wall clock (task.maxRuntimeMs)", () => {
 			id: "late-generation",
 			settings: Settings.isolated({ "task.maxRuntimeMs": 0 }),
 			signal: abortController.signal,
+			agentRegistry: registry,
+			agentLifecycle: lifecycle,
 		});
 		const creationOptions = await creationStarted.promise;
 		expect(creationOptions.expectedAgentRef).toBeNull();

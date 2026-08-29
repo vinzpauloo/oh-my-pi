@@ -31,6 +31,7 @@ import { initTheme } from "../src/modes/theme/theme";
 import { AgentSession } from "../src/session/agent-session";
 import { AuthStorage } from "../src/session/auth-storage";
 import { SessionManager } from "../src/session/session-manager";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 function makeTool(name: string): AgentTool {
 	return {
@@ -178,12 +179,19 @@ export default function (pi) {
 
 		const result = await loadExtensions([extPath], tempDir.path());
 		expect(result.errors).toEqual([]);
+		const sessionManager = SessionManager.inMemory();
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"autocomplete-provider",
+		);
 		const runner = new ExtensionRunner(
 			result.extensions,
 			result.runtime,
 			tempDir.path(),
-			SessionManager.inMemory(),
+			sessionManager,
 			registry,
+			agentIdentity,
+			agentLifecycleObserver,
 		);
 		const surfaced: string[] = [];
 		runner.onError(error => {
