@@ -31,6 +31,7 @@ import { ExtensionToolWrapper } from "@oh-my-pi/pi-coding-agent/extensibility/ex
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getProjectAgentDir, logger, TempDir } from "@oh-my-pi/pi-utils";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 describe("ExtensionRunner", () => {
 	let tempDir: TempDir;
@@ -100,7 +101,15 @@ describe("ExtensionRunner", () => {
 		const movableSessionManager = SessionManager.inMemory(dirA);
 
 		const result = await loadTestExtensions();
-		const runner = new ExtensionRunner(result.extensions, result.runtime, dirA, movableSessionManager, modelRegistry);
+		const runner = new ExtensionRunner(
+			result.extensions,
+			result.runtime,
+			dirA,
+			movableSessionManager,
+			modelRegistry,
+			createTestExtensionRunnerContext(movableSessionManager, "move").agentIdentity,
+			createTestExtensionRunnerContext(movableSessionManager, "move").agentLifecycleObserver,
+		);
 
 		expect(runner.cwd).toBe(dirA);
 		expect(runner.createContext().cwd).toBe(dirA);
@@ -119,6 +128,8 @@ describe("ExtensionRunner", () => {
 			tempDir.path(),
 			sessionManager,
 			modelRegistry,
+			createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+			createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 		);
 		const actions = {
 			sendMessage: () => {},
@@ -179,6 +190,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const shortcuts = runner.getShortcuts();
 
@@ -208,6 +221,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const shortcuts = runner.getShortcuts();
 
@@ -241,6 +256,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const shortcuts = runner.getShortcuts();
 
@@ -280,6 +297,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const shortcuts = runner.getShortcuts();
 
@@ -315,6 +334,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const tools = runner.getAllRegisteredTools();
 
@@ -343,6 +364,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const commands = runner.getRegisteredCommands();
 
@@ -368,6 +391,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			const cmd = runner.getCommand("my-cmd");
@@ -400,6 +425,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			const commands = runner.getRegisteredCommands();
@@ -429,6 +456,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			const errors: Array<{ extensionPath: string; event: string; error: string }> = [];
@@ -461,6 +490,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			const renderer = runner.getMessageRenderer("my-type");
@@ -485,6 +516,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			expect(runner.getAssistantThinkingRenderers().length).toBe(1);
@@ -510,6 +543,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const flags = runner.getFlags();
 
@@ -534,6 +569,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			// Setting a flag value should not throw
@@ -578,6 +615,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			runner.initialize(
 				{
@@ -644,6 +683,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			const payload = await runner.emitBeforeProviderRequest({ chain: ["base"] });
@@ -676,6 +717,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const errors: Array<{ extensionPath: string; event: string; error: string }> = [];
 			runner.onError(err => {
@@ -730,6 +773,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const errors: Array<{ extensionPath: string; event: string; error: string }> = [];
 			runner.onError(err => {
@@ -796,6 +841,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const completedMessage: AgentMessage = {
 				role: "assistant",
@@ -867,6 +914,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const errors: ExtensionError[] = [];
 			runner.onError(error => errors.push(error));
@@ -939,6 +988,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const controller = new AbortController();
 			runner.initialize(
@@ -1011,6 +1062,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const completedMessage: AgentMessage = {
 				role: "assistant",
@@ -1074,6 +1127,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			const chained = await runner.emitToolResult({
@@ -1128,6 +1183,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			const chained = await runner.emitToolResult({
@@ -1175,7 +1232,15 @@ describe("ExtensionRunner", () => {
 		const runnerFor = async (extCode: string): Promise<ExtensionRunner> => {
 			fs.writeFileSync(path.join(extensionsDir, "rewrite.ts"), extCode);
 			const result = await loadTestExtensions();
-			return new ExtensionRunner(result.extensions, result.runtime, tempDir.path(), sessionManager, modelRegistry);
+			return new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "tool-call-error").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "tool-call-error").agentLifecycleObserver,
+			);
 		};
 
 		it("surfaces replacement content while keeping the call an error", async () => {
@@ -1308,6 +1373,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
 			const errors: Array<{ extensionPath: string; event: string; error: string }> = [];
@@ -1366,6 +1433,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			runner.onToolRegistered(() => Promise.withResolvers<void>().promise);
 			const errors: ExtensionError[] = [];
@@ -1407,6 +1476,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "tool-call-timeout").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "tool-call-timeout").agentLifecycleObserver,
 				undefined,
 				Settings.isolated({ "extensionHandlers.toolCallTimeoutMs": 10 }),
 			);
@@ -1478,6 +1549,8 @@ describe("ExtensionRunner", () => {
 						tempDir.path(),
 						sessionManager,
 						modelRegistry,
+						createTestExtensionRunnerContext(sessionManager, "configured-timeout").agentIdentity,
+						createTestExtensionRunnerContext(sessionManager, "configured-timeout").agentLifecycleObserver,
 						undefined,
 						Settings.isolated({ "extensionHandlers.toolCallTimeoutMs": configuredTimeout }),
 					);
@@ -1538,6 +1611,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			runner.onToolRegistered(async () => {
 				throw new Error("expected tool-call registration failure");
@@ -1599,6 +1674,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			runner.onToolRegistered(() => Promise.withResolvers<void>().promise);
 			const extension = loaded.extensions[0];
@@ -1648,6 +1725,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const dialog = Promise.withResolvers<boolean>();
 			const handlerStarted = Promise.withResolvers<void>();
@@ -1757,6 +1836,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const factoryStarted = Promise.withResolvers<void>();
 			const notify: ExtensionUIContext["notify"] = message => {
@@ -1824,6 +1905,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			let dialogSignal: AbortSignal | undefined;
 			const dialog = Promise.withResolvers<boolean>();
@@ -1890,6 +1973,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "memory-backend").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "memory-backend").agentLifecycleObserver,
 				() => ({
 					status: async () => ({
 						backend: "mnemopi",
@@ -1976,6 +2061,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const serviceTiers = { openai: "priority" as const };
 			const snapshots: unknown[] = [];
@@ -2054,6 +2141,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			runner.initialize(
 				{
@@ -2203,6 +2292,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const select = vi.fn(async () => {
 				events.push({ type: "ui_select" });
@@ -2250,6 +2341,8 @@ describe("ExtensionRunner", () => {
 					tempDir.path(),
 					sessionManager,
 					modelRegistry,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 				);
 				const preview = Promise.withResolvers<void>();
 				const order: string[] = [];
@@ -2320,6 +2413,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			initializeRunner(runner, async () => "Deny");
 
@@ -2369,6 +2464,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			initializeRunner(runner, async () => {
 				throw new Error("dialog aborted");
@@ -2425,6 +2522,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			const wrapper = new ExtensionToolWrapper(approvalTool, runner);
@@ -2486,6 +2585,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const wrapped = new ExtensionToolWrapper(createHashlineEditTool(), runner);
 
@@ -2527,6 +2628,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const wrapped = new ExtensionToolWrapper(createHashlineEditTool(), runner);
 
@@ -2566,6 +2669,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const wrapped = new ExtensionToolWrapper(createHashlineEditTool(), runner);
 
@@ -2609,6 +2714,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const wrapped = new ExtensionToolWrapper(createHashlineEditTool(), runner);
 
@@ -2665,6 +2772,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const wrapped = new ExtensionToolWrapper(createRecordingTool(recordPath), runner);
 
@@ -2698,6 +2807,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const wrapped = new ExtensionToolWrapper(createRecordingTool(recordPath), runner);
 
@@ -2793,6 +2904,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const wrapped = new ExtensionToolWrapper(createArgGatedTool(recordPath), runner);
 
@@ -2824,6 +2937,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const wrapped = new ExtensionToolWrapper(createArgGatedTool(recordPath), runner);
 
@@ -2866,6 +2981,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const wrapped = new ExtensionToolWrapper(createRecordingTool(recordPath), runner);
 
@@ -2900,6 +3017,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			let promptedWith = "";
 			const select = vi.fn(async (title: string) => {
@@ -2962,6 +3081,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const wrapped = new ExtensionToolWrapper(createRecordingTool(recordPath), runner);
 
@@ -3001,6 +3122,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const wrapped = new ExtensionToolWrapper(createRecordingTool(recordPath), runner);
 			const xdevContext = {
@@ -3033,6 +3156,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const tool = createRecordingTool(recordPath);
 			tool.approval = args =>
@@ -3083,6 +3208,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const select = vi.fn(async () => {
 				order.push("ui_select");
@@ -3129,6 +3256,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			expect(runner.hasHandlers("tool_call")).toBe(true);
@@ -3157,6 +3286,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			// createContext is the per-event allocation the fast path defers; spying on
@@ -3212,6 +3343,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			await runner.emit({ type: "credential_disabled", provider: "anthropic", disabledCause: "invalid_grant" });
@@ -3257,6 +3390,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			const errors: Array<{ extensionPath: string; event: string; error: string }> = [];
 			runner.onError(err => {
@@ -3284,6 +3419,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			expect(runner.hasHandlers("credential_disabled")).toBe(false);
@@ -3315,6 +3452,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			// Push 33 events while uninitialized — the 1st should be dropped.
@@ -3393,6 +3532,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			runner.initialize(
 				{
@@ -3473,6 +3614,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 
 			// Push 101 events while uninitialized — the 1st should be dropped, next 100 buffered.
@@ -3537,6 +3680,8 @@ describe("ExtensionRunner", () => {
 					tempDir.path(),
 					sessionManager,
 					modelRegistry,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 				);
 				const errors: ExtensionError[] = [];
 				runner.onError(err => errors.push(err));
@@ -3569,6 +3714,8 @@ describe("ExtensionRunner", () => {
 					tempDir.path(),
 					sessionManager,
 					modelRegistry,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 				);
 				const errors: ExtensionError[] = [];
 				runner.onError(err => errors.push(err));
@@ -3595,6 +3742,8 @@ describe("ExtensionRunner", () => {
 					tempDir.path(),
 					sessionManager,
 					modelRegistry,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 				);
 				const ctx = runner.createContext();
 				let ticks = 0;
@@ -3622,6 +3771,8 @@ describe("ExtensionRunner", () => {
 					tempDir.path(),
 					sessionManager,
 					modelRegistry,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 				);
 				const ctx = runner.createContext();
 				let intervalTicks = 0;
@@ -3669,6 +3820,8 @@ describe("ExtensionRunner", () => {
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
 			);
 			runner.setNativeToolResolver(name =>
 				name === native.name ? { tool: native, makeContext: () => ({}) as never } : undefined,
@@ -3746,7 +3899,15 @@ describe("ExtensionRunner", () => {
 				flags: new Map(),
 				shortcuts: new Map(),
 			};
-			return new ExtensionRunner([extension], new ExtensionRuntime(), tempDir.path(), sessionManager, modelRegistry);
+			return new ExtensionRunner(
+				[extension],
+				new ExtensionRuntime(),
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "image-removal").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "image-removal").agentLifecycleObserver,
+			);
 		};
 
 		it("applies image-only removal independently of text", async () => {

@@ -13,6 +13,7 @@ import * as unexpectedStopClassifier from "@oh-my-pi/pi-coding-agent/session/une
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir, withTimeout } from "@oh-my-pi/pi-utils";
 import * as logger from "@oh-my-pi/pi-utils/logger";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 const runtimeSignalStoreKey = "__ompRuntimeSignals";
 
@@ -85,7 +86,19 @@ describe("AgentSession auto-compaction queue resume", () => {
 		sessionManager = SessionManager.inMemory(tempDir.path());
 		getRuntimeSignals().length = 0;
 
-		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"auto-compaction-queue",
+		);
+		const extensionRunner = new ExtensionRunner(
+			[extension],
+			runtime,
+			tempDir.path(),
+			sessionManager,
+			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
+		);
 
 		const bundled = getBundledModel("anthropic", "claude-sonnet-4-5");
 		if (!bundled) {

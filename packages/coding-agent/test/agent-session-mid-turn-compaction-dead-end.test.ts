@@ -14,6 +14,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 const noopSchema = type({});
 const noopTool: AgentTool<typeof noopSchema, undefined> = {
@@ -85,12 +86,18 @@ describe("AgentSession mid-turn compaction dead-end", () => {
 			extensionLines.push("}");
 			fs.writeFileSync(extensionPath, extensionLines.join("\n"));
 			const loaded = await loadExtensions([extensionPath], tempDir.path());
+			const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+				sessionManager,
+				"mid-turn-compaction-dead-end",
+			);
 			extensionRunner = new ExtensionRunner(
 				loaded.extensions,
 				loaded.runtime,
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				agentIdentity,
+				agentLifecycleObserver,
 			);
 		}
 

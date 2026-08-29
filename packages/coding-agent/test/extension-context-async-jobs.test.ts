@@ -2,18 +2,22 @@ import { describe, expect, it } from "bun:test";
 import { ExtensionRunner } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/runner";
 import type { ExtensionRuntime } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import type { AsyncJobSnapshot } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 function createRunner(getAsyncJobSnapshot?: () => AsyncJobSnapshot | null): ExtensionRunner {
 	const runtime = {
 		flagValues: new Map(),
 		pendingProviderRegistrations: [],
 	} as unknown as ExtensionRuntime;
+	const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext("test-session", "async-jobs");
 	return new ExtensionRunner(
 		[],
 		runtime,
 		"/tmp",
-		{ getCwd: () => "/tmp" } as never,
+		{ getCwd: () => "/tmp", getSessionId: () => "test-session" } as never,
 		{} as never,
+		agentIdentity,
+		agentLifecycleObserver,
 		undefined,
 		undefined,
 		undefined,

@@ -224,6 +224,10 @@ Command/renderer conflicts:
 
 `ctx` includes `hasUI`, `cwd`, `sessionManager`, `modelRegistry`, current `model`, `isIdle()`, `abort()`, and `hasQueuedMessages()`.
 
+### Lineage-blind context contract
+
+`HookContext` (and `HookCommandContext`) is **explicitly lineage-blind**: it does not expose `ctx.agent` or `ctx.agentLifecycle`. Hooks operate under a lightweight, session-contained execution contract without coupling to the multi-agent hierarchy or root lifecycle observer. If an integration requires access to agent identity, parentage, root topology, or lifecycle observation, author an extension (`ExtensionContext`) instead.
+
 When running with no UI, the default no-op context behavior is:
 
 - `select/input/editor` return `undefined`

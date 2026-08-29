@@ -22,6 +22,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir, withTimeout } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 const HANDOFF_SECRET = "HANDOFF_SECRET_TOKEN_12345";
 const UNRENDERABLE_SNAPCOMPACT_TEXT = "\uE000\uE001\uE002\uE003\uE004\uE005\uE006\uE007\uE008\uE009";
@@ -217,12 +218,18 @@ describe("AgentSession handoff", () => {
 		if (!sessionFile) throw new Error("Expected a persisted session file");
 		sessionManager = await SessionManager.open(sessionFile, tempDir.path());
 		const extensionsResult = await loadExtensions([], tempDir.path());
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"session-switch",
+		);
 		const extensionRunner = new ExtensionRunner(
 			extensionsResult.extensions,
 			extensionsResult.runtime,
 			tempDir.path(),
 			sessionManager,
 			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
 		);
 		const observedEvents: Array<{
 			type: "session_before_switch" | "session_switch";
@@ -1088,12 +1095,18 @@ describe("AgentSession handoff", () => {
 		events = [];
 
 		const extensionsResult = await loadExtensions([], tempDir.path());
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"non-message-tokens",
+		);
 		const extensionRunner = new ExtensionRunner(
 			extensionsResult.extensions,
 			extensionsResult.runtime,
 			tempDir.path(),
 			sessionManager,
 			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
 		);
 		const emitBeforeAgentStart = vi
 			.spyOn(extensionRunner, "emitBeforeAgentStart")
@@ -1567,12 +1580,18 @@ describe("AgentSession handoff", () => {
 			extensionsResult.runtime,
 			"capture-agent-end",
 		);
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"capture-agent-end",
+		);
 		const extensionRunner = new ExtensionRunner(
 			[captureAgentEnd],
 			extensionsResult.runtime,
 			tempDir.path(),
 			sessionManager,
 			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
 		);
 		session = new AgentSession({
 			agent,
@@ -1788,12 +1807,18 @@ describe("AgentSession handoff", () => {
 		if (!sessionFile) throw new Error("Expected a persisted session file");
 		sessionManager = await SessionManager.open(sessionFile, tempDir.path());
 		const extensionsResult = await loadExtensions([], tempDir.path());
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"vetoed-handoff",
+		);
 		const extensionRunner = new ExtensionRunner(
 			extensionsResult.extensions,
 			extensionsResult.runtime,
 			tempDir.path(),
 			sessionManager,
 			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
 		);
 		vi.spyOn(extensionRunner, "hasHandlers").mockImplementation(eventName => eventName === "session_before_switch");
 		const emitSpy = vi.spyOn(extensionRunner, "emit").mockImplementation((async () => ({
@@ -1868,12 +1893,18 @@ describe("AgentSession handoff", () => {
 		sessionManager = SessionManager.create(tempDir.path(), tempDir.path());
 
 		const extensionsResult = await loadExtensions([], tempDir.path());
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"reset-system-prompt",
+		);
 		const extensionRunner = new ExtensionRunner(
 			extensionsResult.extensions,
 			extensionsResult.runtime,
 			tempDir.path(),
 			sessionManager,
 			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
 		);
 		const emitBeforeAgentStart = vi.spyOn(extensionRunner, "emitBeforeAgentStart").mockResolvedValueOnce({
 			systemPrompt: ["Hook override"],

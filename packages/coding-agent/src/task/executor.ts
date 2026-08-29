@@ -276,10 +276,8 @@ function installSubagentRetryFallbackChain(args: {
 	return role;
 }
 
-function renderIrcPeerRoster(selfId: string): string {
-	const peers = AgentRegistry.global()
-		.list()
-		.filter(ref => ref.id !== selfId && ref.status !== "aborted" && ref.kind !== "advisor");
+function renderIrcPeerRoster(selfId: string, registry: AgentRegistry): string {
+	const peers = registry.list().filter(ref => ref.id !== selfId && ref.status !== "aborted" && ref.kind !== "advisor");
 	if (peers.length === 0) return "- (no other agents)";
 	const lines = peers.map(
 		peer =>
@@ -485,6 +483,9 @@ export interface ExecutorOptions {
 	 * passes its own `getAgentId()`).
 	 */
 	parentAgentId?: string;
+	/** Registry and lifecycle owner inherited from the spawning session. */
+	agentRegistry?: AgentRegistry;
+	agentLifecycle?: AgentLifecycleManager;
 	/**
 	 * Keep the finished subagent addressable in the registry for IRC/revival.
 	 * Defaults to true. Eval bridge agents are programmatic one-shot helpers and
@@ -931,6 +932,7 @@ interface RunMonitorArgs {
 	parentToolCallId?: string;
 	detached?: boolean;
 	sessionFile?: string;
+	agentRegistry?: AgentRegistry;
 	/** Soft assistant-request budget; 0 disables the guard. */
 	softRequestBudget: number;
 	/** Whether crossing the soft budget injects a wrap-up steering notice. */
@@ -1020,6 +1022,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		softRequestBudgetNotice,
 		maxRuntimeMs,
 	} = args;
+	const agentRegistry = args.agentRegistry ?? AgentRegistry.global();
 	const startTime = Date.now();
 
 	const progress: AgentProgress = {
@@ -1255,7 +1258,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 		onProgress?.({ ...progress });
 		const activityGist =
 			progress.lastIntent ?? (progress.currentTool ? `running ${progress.currentTool}` : undefined);
-		if (activityGist) AgentRegistry.global().setActivity(id, activityGist);
+		if (activityGist) agentRegistry.setActivity(id, activityGist);
 		if (args.eventBus) {
 			args.eventBus.emit(TASK_SUBAGENT_PROGRESS_CHANNEL, {
 				index,
@@ -2292,6 +2295,7 @@ export interface IrcWakeTurnMonitorOptions {
 	parentToolCallId?: string;
 	/** Fallback session file when the registry ref carries none. */
 	sessionFile?: string;
+	agentRegistry?: AgentRegistry;
 	maxRuntimeMs?: number;
 	outputSchema?: unknown;
 	outputSchemaMode?: StructuredSubagentSchemaMode;
@@ -2309,6 +2313,7 @@ export interface IrcWakeTurnMonitorOptions {
  */
 export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWakeTurnMonitorOptions): void {
 	const { id, agent } = options;
+	const agentRegistry = options.agentRegistry ?? AgentRegistry.global();
 	const index = options.index ?? 0;
 	const maxRuntimeMs = options.maxRuntimeMs ?? 0;
 	session.setIrcWakeTurnObserver(records => {
@@ -2324,7 +2329,7 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 				.filter(Boolean)
 				.join("\n\n") || "IRC follow-up";
 		const turnStartTime = Date.now();
-		const sessionFile = AgentRegistry.global().get(id)?.sessionFile ?? options.sessionFile ?? undefined;
+		const sessionFile = agentRegistry.get(id)?.sessionFile ?? options.sessionFile ?? undefined;
 		const turnMonitor = createSubagentRunMonitor({
 			index,
 			id,
@@ -2337,6 +2342,7 @@ export function attachIrcWakeTurnMonitor(session: AgentSession, options: IrcWake
 			parentToolCallId: options.parentToolCallId,
 			detached: true,
 			sessionFile,
+			agentRegistry,
 			softRequestBudget: 0,
 			softRequestBudgetNotice: false,
 			maxRuntimeMs,
@@ -2430,8 +2436,14 @@ export async function finalizeSubagentLifecycle(args: {
 	reviveSession: AgentReviver | null;
 	cleanupDeadlineAt?: number;
 	onCleanupDeferred?: (completion: Promise<void>) => void;
+	registry?: AgentRegistry;
+	lifecycle?: AgentLifecycleManager;
 }): Promise<void> {
-	const registry = AgentRegistry.global();
+	const registry = args.registry ?? AgentRegistry.global();
+	const lifecycle = args.lifecycle ?? AgentLifecycleManager.global();
+	if (!lifecycle.manages(registry)) {
+		throw new Error("finalizeSubagentLifecycle requires a lifecycle manager paired with its registry.");
+	}
 	const ref = registry.get(args.id);
 	const ownsRef = Boolean(ref && ref.session === args.session);
 	const cleanupDeadlineAt = args.cleanupDeadlineAt ?? Date.now() + 5000;
@@ -2462,21 +2474,21 @@ export async function finalizeSubagentLifecycle(args: {
 		if (ref && ownsRef) {
 			if (args.abortKind === "shutdown") {
 				try {
-					await AgentLifecycleManager.global().release(args.id, ref);
+					await lifecycle.release(args.id, ref, { reason: "process-shutdown" });
 				} catch (error) {
 					logger.warn("runSubagent: failed to release session during manager shutdown", {
 						id: args.id,
 						error: String(error),
 					});
 					await disposeSession();
-					registry.unregister(args.id, ref);
+					if (registry.unregister(args.id, ref)) lifecycle.commitReleased(ref, "process-shutdown");
 				}
 			} else {
 				// Route hard kills through the lifecycle owner so the terminal
 				// decision is durable and a restart cannot rediscover the transcript
 				// as a revivable parked agent.
 				try {
-					await AgentLifecycleManager.global().release(args.id, ref, { tombstone: true });
+					await lifecycle.release(args.id, ref, { tombstone: true });
 				} catch (error) {
 					logger.warn("runSubagent: failed to persist kill tombstone", { id: args.id, error: String(error) });
 					registry.setStatus(args.id, "aborted", ref);
@@ -2493,7 +2505,7 @@ export async function finalizeSubagentLifecycle(args: {
 	if (!args.keepAlive) {
 		// One-shot helper: dispose and unregister. No IRC, no revival.
 		await disposeSession();
-		if (ref && ownsRef) registry.unregister(args.id, ref);
+		if (ref && ownsRef && registry.unregister(args.id, ref)) lifecycle.commitReleased(ref);
 		return;
 	}
 
@@ -2501,11 +2513,12 @@ export async function finalizeSubagentLifecycle(args: {
 		// Isolated run: the worktree is merged + cleaned after the run, so
 		// the session is not resumable. Park the ref WITHOUT adopting — the
 		// transcript stays reachable (history://), but ensureLive will throw.
-		// Status must flip to "parked" before dispose so the sdk dispose
-		// wrapper skips unregister.
-		if (ref && ownsRef) registry.setStatus(args.id, "parked", ref);
+		if (ref && ownsRef) {
+			const detached = registry.detachSession(args.id, ref);
+			const parked = detached && registry.setStatus(args.id, "parked", ref);
+			if (parked) lifecycle.commitParked(ref, false);
+		}
 		await disposeSession();
-		if (ref && ownsRef) registry.detachSession(args.id, ref);
 		return;
 	}
 
@@ -2515,7 +2528,7 @@ export async function finalizeSubagentLifecycle(args: {
 		await disposeSession();
 		return;
 	}
-	AgentLifecycleManager.global().adopt(
+	lifecycle.adopt(
 		args.id,
 		{
 			idleTtlMs: args.agentIdleTtlMs,
@@ -2549,6 +2562,8 @@ export interface FollowUpTurnOptions {
 	artifactsDir?: string;
 	/** Wall-clock cap in ms for this turn; 0 disables. */
 	maxRuntimeMs?: number;
+	agentRegistry?: AgentRegistry;
+	agentLifecycle?: AgentLifecycleManager;
 }
 
 /**
@@ -2566,8 +2581,13 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 	const { id, agent, message, signal } = options;
 	const index = options.index ?? 0;
 	const startTime = Date.now();
-	const session = await AgentLifecycleManager.global().ensureLive(id);
-	const ref = AgentRegistry.global().get(id);
+	const registry = options.agentRegistry ?? AgentRegistry.global();
+	const lifecycle = options.agentLifecycle ?? AgentLifecycleManager.global();
+	if (!lifecycle.manages(registry)) {
+		throw new Error("runSubagentFollowUpTurn requires a lifecycle manager paired with its registry.");
+	}
+	const session = await lifecycle.ensureLive(id);
+	const ref = registry.get(id);
 	const sessionFile = ref?.sessionFile ?? undefined;
 
 	const monitor = createSubagentRunMonitor({
@@ -2583,6 +2603,7 @@ export async function runSubagentFollowUpTurn(options: FollowUpTurnOptions): Pro
 		parentToolCallId: options.parentToolCallId,
 		detached: true,
 		sessionFile,
+		agentRegistry: registry,
 		softRequestBudget: 0,
 		softRequestBudgetNotice: false,
 		maxRuntimeMs: options.maxRuntimeMs ?? 0,
@@ -2660,6 +2681,11 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		signal,
 		onProgress,
 	} = options;
+	const agentRegistry = options.agentRegistry ?? AgentRegistry.global();
+	const agentLifecycle = options.agentLifecycle ?? AgentLifecycleManager.global();
+	if (!agentLifecycle.manages(agentRegistry)) {
+		throw new Error("runSubprocess requires a lifecycle manager paired with its registry.");
+	}
 	const cleanupGraceMs = options.cleanupGraceMs ?? TASK_ABORT_CLEANUP_GRACE_MS;
 	const startTime = Date.now();
 	// Set by the session's onFirstChatDispatch hook the first time the agent
@@ -2794,6 +2820,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		onProgress,
 		eventBus: options.eventBus,
 		parentToolCallId: options.parentToolCallId,
+		agentRegistry,
 		detached: options.detached,
 		sessionFile: subtaskSessionFile,
 		softRequestBudget,
@@ -2814,6 +2841,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			eventBus: options.eventBus,
 			parentToolCallId: options.parentToolCallId,
 			sessionFile: subtaskSessionFile,
+			agentRegistry,
 			maxRuntimeMs,
 			outputSchema,
 			outputSchemaMode: options.outputSchemaMode,
@@ -3096,7 +3124,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 						worktree: worktree ?? "",
 						outputSchema: normalizedOutputSchema,
 						outputSchemaOverridesAgent: options.outputSchemaOverridesAgent === true,
-						ircPeers: ircEnabled ? renderIrcPeerRoster(id) : "",
+						ircPeers: ircEnabled ? renderIrcPeerRoster(id, agentRegistry) : "",
 						ircSelfId: ircEnabled ? id : "",
 					});
 					return defaultPrompt.length === 0
@@ -3110,6 +3138,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				taskDepth: childDepth,
 				parentHindsightSessionState: options.parentHindsightSessionState,
 				parentMnemopiSessionState: options.parentMnemopiSessionState,
+				agentRegistry,
+				agentLifecycle,
 				parentTaskPrefix: id,
 				parentAgentId: options.parentAgentId,
 				agentId: id,
@@ -3147,11 +3177,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 				throw err;
 			}
 			sessionCreatedAt = performance.now();
-
 			monitor.setActiveSession(session);
 			// Run-state notifications precede deferrable wire-level `agent_end`,
 			// so adopted keep-alive lifecycle cannot get stuck during prompt unwind.
-			AgentRegistry.global().syncSessionStatus(id, session);
+			agentRegistry.syncSessionStatus(id, session);
 			if (sessionFile !== null && worktree === undefined) {
 				// Lifecycle reviver: park closed the JSONL writer, so reopening takes
 				// the single-writer lock cleanly and restores the full message history
@@ -3167,7 +3196,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					const { session: revived } = await createAgentSession(
 						buildSubagentSessionOptions(reopened, expectedAgentRef),
 					);
-					AgentRegistry.global().syncSessionStatus(id, revived);
+					agentRegistry.syncSessionStatus(id, revived);
 					installIrcWakeTurnMonitor(revived);
 					return revived;
 				};
@@ -3394,6 +3423,8 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 					agentIdleTtlMs,
 					reviveSession,
 					cleanupDeadlineAt,
+					registry: agentRegistry,
+					lifecycle: agentLifecycle,
 					onCleanupDeferred: completion => {
 						deferredSessionShutdown = completion;
 						deferCleanup(completion);
@@ -3488,6 +3519,6 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 		sessionFile: subtaskSessionFile,
 		startTime,
 	});
-	AgentRegistry.global().setHistory(id, { outputPath: result.outputPath });
+	agentRegistry.setHistory(id, { outputPath: result.outputPath });
 	return result;
 }

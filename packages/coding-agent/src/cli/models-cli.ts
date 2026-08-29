@@ -18,6 +18,7 @@ import chalk from "@oh-my-pi/pi-utils/chalk";
 import { ModelRegistry } from "../config/model-registry";
 import { Settings } from "../config/settings";
 import { discoverAndLoadExtensions, ExtensionRunner, emitSessionShutdownEvent } from "../extensibility/extensions";
+import { createStandaloneAgentContract } from "../registry/agent-public-contract";
 import { discoverAuthStorage } from "../sdk";
 import { SessionManager } from "../session/session-manager";
 import { EventBus } from "../utils/event-bus";
@@ -306,16 +307,23 @@ export async function runModelsListing(options: RunModelsListingOptions): Promis
 		disableExtensionDiscovery ? undefined : disabledExtensionIds,
 		{ ambient: !disableExtensionDiscovery, includeAmbientHooks: false },
 	);
-	const extensionRunner =
-		extensionsResult.extensions.length > 0
-			? new ExtensionRunner(
-					extensionsResult.extensions,
-					extensionsResult.runtime,
-					cwd,
-					SessionManager.inMemory(cwd),
-					modelRegistry,
-				)
-			: undefined;
+	let extensionRunner: ExtensionRunner | undefined;
+	if (extensionsResult.extensions.length > 0) {
+		const sessionManager = SessionManager.inMemory(cwd);
+		const { agentIdentity, agentLifecycleObserver } = createStandaloneAgentContract(
+			sessionManager.getSessionId(),
+			"models-cli",
+		);
+		extensionRunner = new ExtensionRunner(
+			extensionsResult.extensions,
+			extensionsResult.runtime,
+			cwd,
+			sessionManager,
+			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
+		);
+	}
 
 	try {
 		for (const { path: extPath, error } of extensionsResult.errors) {

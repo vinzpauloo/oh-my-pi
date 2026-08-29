@@ -6,6 +6,8 @@
 
 - Added per-advisor `fallbackRole` support in `WATCHDOG.yml`, allowing named advisors to retain independent retry fallback chains even when their primary models overlap.
 - Added optional per-advisor `when` filters so specialized reviewers can run only on matching primary-turn deltas while omitted filters remain always-on.
+- Added immutable public agent identity (`ctx.agent` / `AgentPublicIdentity` with `schemaVersion: 1`, `agentId`, `rootAgentId`, `parentAgentId`, `currentSessionId`, `kind: "main" | "sub"`, `label`, and opaque `inspectLocator`) and root lifecycle observation (`ctx.agentLifecycle` / `AgentLifecycleObserver` with atomic snapshot and subscription stream) to `ExtensionContext`.
+- Introduced public agent lifecycle model with manager-owned versions and sequences, states (`active`, `parked`, `released`, `aborted`), transitions (`registered`, `parked`, `revived`, `released`, `aborted`), nonterminal park/revival semantics (with `revivable` entry boolean and isolated parked support), retained terminal entries for complete lineage auditability, and paired SDK session options (`options.agentRegistry` and `options.agentLifecycle`), while keeping `HookContext` and `CustomToolContext` explicitly lineage-blind.
 
 ## [17.3.7] - 2026-08-17
 

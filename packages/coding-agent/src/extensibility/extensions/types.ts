@@ -60,6 +60,7 @@ import type { LocalProtocolOptions } from "../../internal-urls/local-protocol";
 import type { MemoryRuntimeContext } from "../../memory-backend";
 import type { CustomEditor } from "../../modes/components/custom-editor";
 import type { Theme } from "../../modes/theme/theme";
+import type { AgentLifecycleObserver, AgentPublicIdentity } from "../../registry/agent-public-contract";
 import type { AsyncJobSnapshot } from "../../session/agent-session";
 import type { CompactMode } from "../../session/compact-modes";
 import type { CustomMessage, CustomMessagePayload } from "../../session/messages";
@@ -441,6 +442,10 @@ export interface ExtensionModelQuery {
 export type ExtensionMode = "tui" | "rpc" | "json" | "print";
 
 export interface ExtensionContext {
+	/** Immutable scalar identity for this root or subagent session. */
+	readonly agent: AgentPublicIdentity;
+	/** Root-scoped immutable lifecycle snapshot and ordered transition stream. */
+	readonly agentLifecycle: AgentLifecycleObserver;
 	/** UI methods for user interaction */
 	ui: ExtensionUIContext;
 	/** Current run mode. Use `"tui"` to guard terminal-only UI such as custom components. */
