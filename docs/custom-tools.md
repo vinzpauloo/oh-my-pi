@@ -144,8 +144,12 @@ execute(toolCallId, params, onUpdate, ctx, signal);
 - `params` is statically typed from its omptype or TypeBox schema via `Static<TParams>`.
 - Runtime argument validation happens before execution in the agent loop.
 - `onUpdate` emits partial results for UI streaming.
-- `ctx` includes `sessionManager`, `modelRegistry`, current `model`, `isIdle()`, `hasQueuedMessages()`, `abort()`, and optional `settings`, `fetch`, `localProtocolOptions`, and `autoApprove`.
+- `ctx` (`CustomToolContext`) includes `sessionManager`, `modelRegistry`, current `model`, `isIdle()`, `hasQueuedMessages()`, `abort()`, and optional `settings`, `fetch`, `localProtocolOptions`, and `autoApprove`.
 - `signal` carries cancellation and may be `undefined`.
+
+### Lineage-blind context contract
+
+`CustomToolContext` is **explicitly lineage-blind**: it does not expose `ctx.agent` or `ctx.agentLifecycle`. Custom tools focus strictly on model-callable actions and session-local execution parameters. If a tool needs access to public agent identity (`ctx.agent`) or root lifecycle observation (`ctx.agentLifecycle`), register it as an extension tool via `pi.registerTool(...)` where `ExtensionContext` provides the identity and lifecycle observer.
 
 The session bootstrap bridge converts custom tools to extension `ToolDefinition`s and forwards calls in the correct argument order. `CustomToolAdapter` remains available to library consumers that directly adapt a custom tool to the agent tool interface.
 

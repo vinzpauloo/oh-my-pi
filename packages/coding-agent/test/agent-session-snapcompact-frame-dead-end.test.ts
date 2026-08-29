@@ -14,6 +14,7 @@ import type { CompactionEntry } from "@oh-my-pi/pi-coding-agent/session/session-
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 /**
  * Regression test for the snapcompact frame dead-end.
@@ -111,12 +112,18 @@ describe("AgentSession snapcompact frame dead-end rescue", () => {
 				].join("\n"),
 			);
 			const extensionsResult = await loadExtensions([extensionPath], tempDir.path());
+			const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+				sessionManager,
+				"snapcompact-frame-dead-end",
+			);
 			extensionRunner = new ExtensionRunner(
 				extensionsResult.extensions,
 				extensionsResult.runtime,
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				agentIdentity,
+				agentLifecycleObserver,
 			);
 		}
 

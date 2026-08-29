@@ -171,6 +171,7 @@ import planModeToolDecisionReminderPrompt from "../prompts/system/plan-mode-tool
 import rewindReportTemplate from "../prompts/system/rewind-report.md" with { type: "text" };
 import sideChannelNoToolsReminder from "../prompts/system/side-channel-no-tools.md" with { type: "text" };
 import vibeModeActivePrompt from "../prompts/system/vibe-mode-active.md" with { type: "text" };
+import { createStandaloneAgentContract } from "../registry/agent-public-contract";
 import {
 	deobfuscateAssistantContent,
 	deobfuscateSessionContext,
@@ -5783,7 +5784,14 @@ export class AgentSession {
 			return this.#extensionRunner.createCommandContext();
 		}
 
+		const { agentIdentity, agentLifecycleObserver } = createStandaloneAgentContract(
+			this.sessionManager.getSessionId(),
+			"agent-session-command-context",
+		);
+
 		return {
+			agent: agentIdentity,
+			agentLifecycle: agentLifecycleObserver,
 			ui: noOpUIContext,
 			mode: "print",
 			hasUI: false,
@@ -5871,12 +5879,35 @@ export class AgentSession {
 			this.#mcpPromptCommands.find(c => c.command.name === commandName);
 		if (!loaded) return null;
 
-		// Get command context from extension runner (includes session control methods)
+		// Project the extension context onto the deliberately narrower hook surface.
 		const baseCtx = this.#createCommandContext();
-		const ctx = {
-			...baseCtx,
+		const ctx: HookCommandContext = {
+			ui: {
+				select: (title, options) => baseCtx.ui.select(title, options),
+				confirm: (title, message) => baseCtx.ui.confirm(title, message),
+				input: (title, placeholder) => baseCtx.ui.input(title, placeholder),
+				notify: (message, type) => baseCtx.ui.notify(message, type),
+				setStatus: (key, text) => baseCtx.ui.setStatus(key, text),
+				custom: factory => baseCtx.ui.custom((tui, theme, _keybindings, done) => factory(tui, theme, done)),
+				setEditorText: text => baseCtx.ui.setEditorText(text),
+				getEditorText: () => baseCtx.ui.getEditorText(),
+				editor: (title, prefill, options, editorOptions) =>
+					baseCtx.ui.editor(title, prefill, options, editorOptions),
+				theme: baseCtx.ui.theme,
+			},
+			hasUI: baseCtx.hasUI,
+			cwd: baseCtx.cwd,
+			sessionManager: baseCtx.sessionManager,
+			modelRegistry: baseCtx.modelRegistry,
+			model: baseCtx.model,
+			isIdle: baseCtx.isIdle,
+			abort: baseCtx.abort,
 			hasQueuedMessages: baseCtx.hasPendingMessages,
-		} as unknown as HookCommandContext;
+			waitForIdle: baseCtx.waitForIdle,
+			newSession: baseCtx.newSession,
+			branch: baseCtx.branch,
+			navigateTree: baseCtx.navigateTree,
+		};
 
 		try {
 			const args = parseCommandArgs(argsString);

@@ -8,6 +8,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 const testProviderConfig: ProviderConfig = {
 	baseUrl: "https://example.invalid/v1",
@@ -186,12 +187,19 @@ describe("extension provider registration rollback", () => {
 				runtime,
 				"pi-cliproxyapi-provider",
 			);
+			const sessionManager = SessionManager.inMemory();
+			const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+				sessionManager,
+				"provider-registration-rollback",
+			);
 			const runner = new ExtensionRunner(
 				[extension],
 				runtime,
 				process.cwd(),
-				SessionManager.inMemory(),
+				sessionManager,
 				modelRegistry,
+				agentIdentity,
+				agentLifecycleObserver,
 			);
 			runner.initialize(
 				{

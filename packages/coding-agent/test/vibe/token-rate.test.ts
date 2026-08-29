@@ -34,6 +34,7 @@ function registerWorker(id: string, session: AgentSession | null, ownerId = OWNE
 			id,
 			displayName: id,
 			kind: "sub",
+			parentId: ownerId,
 			session,
 			status: "running",
 		});

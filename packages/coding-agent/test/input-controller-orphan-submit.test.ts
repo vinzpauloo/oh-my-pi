@@ -14,6 +14,7 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 /**
  * Regression: a submission arriving while the main loop has no input waiter
@@ -278,12 +279,18 @@ describe("InputController orphaned submit", () => {
 				runtime,
 				"widget-status-test",
 			);
+			const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+				sessionManager,
+				"widget-status-test",
+			);
 			const extensionRunner = new ExtensionRunner(
 				[extension],
 				runtime,
 				tempDir.path(),
 				sessionManager,
 				modelRegistry,
+				agentIdentity,
+				agentLifecycleObserver,
 				undefined,
 				settings,
 			);

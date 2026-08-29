@@ -20,6 +20,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { CheckpointTool, RewindTool, type ToolSession } from "@oh-my-pi/pi-coding-agent/tools";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 const checkpointSchema = type({ goal: type("string") });
 const rewindSchema = type({ report: type("string") });
@@ -153,7 +154,19 @@ async function createHarness(
 			runtime,
 			"capture-agent-end",
 		);
-		extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"capture-agent-end",
+		);
+		extensionRunner = new ExtensionRunner(
+			[extension],
+			runtime,
+			tempDir.path(),
+			sessionManager,
+			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
+		);
 	}
 
 	const session = new AgentSession({

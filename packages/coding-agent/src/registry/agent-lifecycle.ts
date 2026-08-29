@@ -24,6 +24,17 @@ import * as fs from "node:fs/promises";
 import { logger, untilAborted } from "@oh-my-pi/pi-utils";
 import type { AgentSession } from "../session/agent-session";
 import { trackLateCleanup } from "../utils/late-cleanup";
+import type {
+	AgentLifecycleEntry,
+	AgentLifecycleListener,
+	AgentLifecycleObserver,
+	AgentLifecycleReason,
+	AgentLifecycleSnapshot,
+	AgentLifecycleState,
+	AgentLifecycleTransition,
+	AgentLifecycleTransitionType,
+	AgentPublicIdentity,
+} from "./agent-public-contract";
 import {
 	type AgentRef,
 	type AgentRefExpectation,
@@ -32,6 +43,27 @@ import {
 	MAIN_AGENT_ID,
 	type RegistryEvent,
 } from "./agent-registry";
+
+export interface CreateAgentPublicIdentityInput {
+	agentId: string;
+	parentAgentId?: string;
+	expectedRef?: AgentRef;
+	currentSessionId: string;
+	kind: AgentPublicIdentity["kind"];
+	label: string;
+}
+
+interface PublicLifecycleRoot {
+	readonly rootAgentId: string;
+	version: number;
+	entries: ReadonlyMap<string, AgentLifecycleEntry>;
+	readonly listeners: Set<AgentLifecycleListener>;
+	observer?: AgentLifecycleObserver;
+}
+
+interface PublicLifecycleBinding {
+	readonly rootInstanceId: string;
+}
 
 export type AgentReviver = (expected: AgentRef) => Promise<AgentSession>;
 
@@ -108,6 +140,10 @@ export class AgentLifecycleManager {
 			current.#adopted.clear();
 			current.#revivals.clear();
 			current.#parks.clear();
+			current.#releases.clear();
+			current.#publicRoots.clear();
+			current.#publicBindings.clear();
+			current.#pendingPublicRoots.clear();
 			current.#persistedReviverFactory = undefined;
 		}
 		AgentLifecycleManager.#global = undefined;
@@ -121,8 +157,13 @@ export class AgentLifecycleManager {
 	 * waits for the park and revives.
 	 */
 	readonly #parks = new Map<string, ParkInFlight>();
+	readonly #releases = new Map<string, AgentRef>();
 	/** In-flight revives, bound to the parked ref that initiated them, so concurrent {@link ensureLive} calls coalesce. */
 	readonly #revivals = new Map<string, RevivingAgent>();
+	readonly #publicRoots = new Map<string, PublicLifecycleRoot>();
+	readonly #pendingPublicRoots = new Map<string, PublicLifecycleRoot>();
+	readonly #publicBindings = new Map<AgentRef, PublicLifecycleBinding>();
+	readonly #identityRootInstances = new WeakMap<AgentPublicIdentity, string>();
 	#unsubscribe: (() => void) | undefined;
 	#persistedReviverFactory: PersistedSubagentReviverFactory | undefined;
 	/** TTL applied when a cold-revived ref is adopted on demand. */
@@ -133,6 +174,279 @@ export class AgentLifecycleManager {
 	constructor(registry: AgentRegistry = AgentRegistry.global()) {
 		this.#registry = registry;
 		this.#unsubscribe = registry.onChange(event => this.#onRegistryEvent(event));
+	}
+
+	createIdentity(input: CreateAgentPublicIdentityInput): AgentPublicIdentity {
+		const expectedBinding = input.expectedRef ? this.#publicBindings.get(input.expectedRef) : undefined;
+		const currentRef = this.#registry.get(input.agentId);
+		const terminalBinding =
+			!input.expectedRef && currentRef?.status === "aborted" ? this.#publicBindings.get(currentRef) : undefined;
+		const tracked = expectedBinding ?? terminalBinding;
+		if (tracked) {
+			const entry = this.#publicRoots.get(tracked.rootInstanceId)?.entries.get(input.agentId);
+			if (entry?.terminal) {
+				throw new Error(`Agent "${input.agentId}" has a retained terminal lifecycle entry and cannot be reused.`);
+			}
+			if (entry) {
+				if (
+					entry.agent.parentAgentId !== (input.parentAgentId ?? null) ||
+					entry.agent.kind !== input.kind ||
+					entry.agent.label !== input.label
+				) {
+					throw new Error(`Agent "${input.agentId}" identity changed while its lifecycle entry is retained.`);
+				}
+				const identity = Object.freeze({ ...entry.agent, currentSessionId: input.currentSessionId });
+				this.#identityRootInstances.set(identity, tracked.rootInstanceId);
+				return identity;
+			}
+		}
+		const parentRef = input.parentAgentId ? this.#registry.get(input.parentAgentId) : undefined;
+		const parentBinding = parentRef ? this.#publicBindings.get(parentRef) : undefined;
+		const parent = parentBinding
+			? this.#publicRoots.get(parentBinding.rootInstanceId)?.entries.get(input.parentAgentId as string)
+			: undefined;
+		const rootAgentId = parent?.agent.rootAgentId ?? input.parentAgentId ?? input.agentId;
+		const rootInstanceId = parentBinding?.rootInstanceId ?? `root:${input.currentSessionId}`;
+		const identity = Object.freeze({
+			schemaVersion: 1,
+			agentId: input.agentId,
+			rootAgentId,
+			parentAgentId: input.parentAgentId ?? null,
+			currentSessionId: input.currentSessionId,
+			kind: input.kind,
+			label: input.label,
+			inspectLocator: `history://${input.agentId}`,
+		});
+		let root = this.#publicRoots.get(rootInstanceId);
+		if (!root) {
+			root = !input.parentAgentId ? this.#pendingPublicRoots.get(rootAgentId) : undefined;
+			if (root) this.#pendingPublicRoots.delete(rootAgentId);
+			else root = { rootAgentId, version: 0, entries: new Map(), listeners: new Set() };
+			this.#publicRoots.set(rootInstanceId, root);
+		}
+		this.#identityRootInstances.set(identity, rootInstanceId);
+		return identity;
+	}
+
+	observer(rootIdentity: string | AgentPublicIdentity): AgentLifecycleObserver {
+		let root: PublicLifecycleRoot | undefined;
+		if (typeof rootIdentity === "string") {
+			const currentRef = this.#registry.get(rootIdentity);
+			const binding = currentRef ? this.#publicBindings.get(currentRef) : undefined;
+			root = binding ? this.#publicRoots.get(binding.rootInstanceId) : undefined;
+			if (!root) {
+				root = this.#pendingPublicRoots.get(rootIdentity);
+				if (!root) {
+					root = { rootAgentId: rootIdentity, version: 0, entries: new Map(), listeners: new Set() };
+					this.#pendingPublicRoots.set(rootIdentity, root);
+				}
+			}
+		} else {
+			const rootInstanceId = this.#identityRootInstances.get(rootIdentity);
+			root = rootInstanceId ? this.#publicRoots.get(rootInstanceId) : undefined;
+			if (!root) throw new Error(`Agent "${rootIdentity.agentId}" has no lifecycle root instance.`);
+		}
+		if (!root.observer) {
+			root.observer = Object.freeze({
+				subscribe: (listener: AgentLifecycleListener) => {
+					root.listeners.add(listener);
+					const snapshot = this.#snapshot(root);
+					let subscribed = true;
+					return Object.freeze({
+						snapshot,
+						unsubscribe: () => {
+							if (!subscribed) return;
+							subscribed = false;
+							root.listeners.delete(listener);
+						},
+					});
+				},
+			});
+		}
+		return root.observer;
+	}
+
+	bootstrapParked(identity: AgentPublicIdentity, ref: AgentRef): boolean {
+		if (
+			this.#registry.get(identity.agentId) !== ref ||
+			ref.id !== identity.agentId ||
+			ref.status !== "parked" ||
+			ref.session ||
+			ref.parentId !== (identity.parentAgentId ?? undefined) ||
+			ref.kind !== identity.kind ||
+			ref.displayName !== identity.label
+		) {
+			return false;
+		}
+		const existingBinding = this.#publicBindings.get(ref);
+		if (existingBinding) {
+			const existing = this.#publicRoots.get(existingBinding.rootInstanceId)?.entries.get(identity.agentId);
+			return (
+				existing?.state === "parked" &&
+				existing.revivable &&
+				!existing.terminal &&
+				this.#sameStableIdentity(existing.agent, identity)
+			);
+		}
+		const rootInstanceId = this.#identityRootInstances.get(identity);
+		if (!rootInstanceId) return false;
+		const root = this.#publicRoots.get(rootInstanceId);
+		if (!root || root.entries.has(identity.agentId)) return false;
+		const agent = Object.freeze({ ...identity });
+		const entry: AgentLifecycleEntry = Object.freeze({
+			agent,
+			state: "parked",
+			sequence: 0,
+			revivable: true,
+			terminal: false,
+		});
+		const entries = new Map(root.entries);
+		entries.set(identity.agentId, entry);
+		root.entries = entries;
+		this.#publicBindings.set(ref, { rootInstanceId });
+		return true;
+	}
+
+	commitRegistered(identity: AgentPublicIdentity, ref: AgentRef): boolean {
+		if (
+			this.#registry.get(identity.agentId) !== ref ||
+			ref.session === null ||
+			ref.status !== "running" ||
+			ref.id !== identity.agentId ||
+			ref.parentId !== (identity.parentAgentId ?? undefined) ||
+			ref.kind !== identity.kind ||
+			ref.displayName !== identity.label ||
+			this.#publicBindings.has(ref)
+		) {
+			return false;
+		}
+		const rootInstanceId = this.#identityRootInstances.get(identity);
+		if (!rootInstanceId) return false;
+		const root = this.#publicRoots.get(rootInstanceId);
+		if (!root || root.entries.has(identity.agentId)) return false;
+		this.#publicBindings.set(ref, { rootInstanceId });
+		return this.#commit(root, identity, "registered", null, "active", "session-created", false, false);
+	}
+
+	commitParked(ref: AgentRef, revivable: boolean): boolean {
+		const binding = this.#publicBindings.get(ref);
+		if (!binding || this.#registry.get(ref.id) !== ref || ref.status !== "parked" || ref.session) {
+			return false;
+		}
+		const root = this.#publicRoots.get(binding.rootInstanceId);
+		const current = root?.entries.get(ref.id);
+		if (!root || !current || current.state !== "active" || current.terminal) return false;
+		return this.#commit(root, current.agent, "parked", current.state, "parked", "idle-timeout", revivable, false);
+	}
+
+	commitRevived(identity: AgentPublicIdentity, ref: AgentRef): boolean {
+		const binding = this.#publicBindings.get(ref);
+		if (!binding || this.#registry.get(ref.id) !== ref || ref.status !== "running" || !ref.session) {
+			return false;
+		}
+		const root = this.#publicRoots.get(binding.rootInstanceId);
+		const current = root?.entries.get(ref.id);
+		if (
+			!root ||
+			!current ||
+			current.state !== "parked" ||
+			!current.revivable ||
+			!this.#sameStableIdentity(current.agent, identity)
+		) {
+			return false;
+		}
+		return this.#commit(root, identity, "revived", "parked", "active", "cold-revive", true, false);
+	}
+
+	commitReleased(ref: AgentRef, reason: "release" | "process-shutdown" = "release"): boolean {
+		const binding = this.#publicBindings.get(ref);
+		if (!binding || this.#registry.get(ref.id) === ref) return false;
+		const root = this.#publicRoots.get(binding.rootInstanceId);
+		const current = root?.entries.get(ref.id);
+		if (!root || !current || current.terminal) return false;
+		const committed = this.#commit(root, current.agent, "released", current.state, "released", reason, false, true);
+		if (committed && this.#publicBindings.get(ref) === binding) this.#publicBindings.delete(ref);
+		return committed;
+	}
+
+	commitAborted(ref: AgentRef): boolean {
+		const binding = this.#publicBindings.get(ref);
+		if (!binding || this.#registry.get(ref.id) !== ref || ref.status !== "aborted") return false;
+		const root = this.#publicRoots.get(binding.rootInstanceId);
+		const current = root?.entries.get(ref.id);
+		if (!root || !current || current.terminal) return false;
+		return this.#commit(root, current.agent, "aborted", current.state, "aborted", "hard-abort", false, true);
+	}
+
+	#findPublicEntry(agentId: string): AgentLifecycleEntry | undefined {
+		const ref = this.#registry.get(agentId);
+		const binding = ref ? this.#publicBindings.get(ref) : undefined;
+		return binding ? this.#publicRoots.get(binding.rootInstanceId)?.entries.get(agentId) : undefined;
+	}
+
+	#snapshot(root: PublicLifecycleRoot): AgentLifecycleSnapshot {
+		return Object.freeze({
+			schemaVersion: 1,
+			rootAgentId: root.rootAgentId,
+			version: root.version,
+			agents: Object.freeze([...root.entries.values()]),
+		});
+	}
+
+	#sameStableIdentity(left: AgentPublicIdentity, right: AgentPublicIdentity): boolean {
+		return (
+			left.schemaVersion === right.schemaVersion &&
+			left.agentId === right.agentId &&
+			left.rootAgentId === right.rootAgentId &&
+			left.parentAgentId === right.parentAgentId &&
+			left.kind === right.kind &&
+			left.label === right.label &&
+			left.inspectLocator === right.inspectLocator
+		);
+	}
+
+	#commit(
+		root: PublicLifecycleRoot,
+		identity: AgentPublicIdentity,
+		transition: AgentLifecycleTransitionType,
+		from: AgentLifecycleState | null,
+		to: AgentLifecycleState,
+		reason: AgentLifecycleReason,
+		revivable: boolean,
+		terminal: boolean,
+	): boolean {
+		const previous = root.entries.get(identity.agentId);
+		const sequence = (previous?.sequence ?? 0) + 1;
+		const agent = Object.freeze({ ...identity });
+		const entry: AgentLifecycleEntry = Object.freeze({ agent, state: to, sequence, revivable, terminal });
+		const entries = new Map(root.entries);
+		entries.set(identity.agentId, entry);
+		root.entries = entries;
+		root.version += 1;
+		const event: AgentLifecycleTransition = Object.freeze({
+			schemaVersion: 1,
+			rootAgentId: root.rootAgentId,
+			version: root.version,
+			sequence,
+			transition,
+			agent,
+			from,
+			to,
+			reason,
+			revivable,
+			terminal,
+		});
+		for (const listener of [...root.listeners]) {
+			try {
+				listener(event);
+			} catch (error) {
+				logger.warn("Agent lifecycle listener failed", {
+					id: identity.agentId,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+		return true;
 	}
 
 	/**
@@ -187,6 +501,7 @@ export class AgentLifecycleManager {
 	async reclaimDeadCorpse(id: string, expected: AgentRef): Promise<boolean> {
 		const ref = this.#registry.get(id);
 		if (ref !== expected || ref.status !== "parked" || ref.session) return false;
+		if (this.#publicBindings.has(ref)) return false;
 		if (this.#adopted.has(id) || this.#parks.has(id) || this.#revivals.has(id)) return false;
 
 		const persistedFactory = ref.sessionFile ? this.#persistedReviverFactory : undefined;
@@ -229,6 +544,11 @@ export class AgentLifecycleManager {
 		return Boolean(
 			park && !park.cancelled && (expected === undefined || park.ref === expected || park.ref.session === expected),
 		);
+	}
+
+	isReleasing(id: string, expected?: AgentRefExpectation): boolean {
+		const ref = this.#releases.get(id);
+		return Boolean(ref && (expected === undefined || ref === expected || ref.session === expected));
 	}
 
 	/**
@@ -287,8 +607,9 @@ export class AgentLifecycleManager {
 				// Commit: detach + parked *before* dispose so callers never see a
 				// dying session via ref.session / idle status.
 				park.detached = true;
-				this.#registry.detachSession(id, ref);
-				this.#registry.setStatus(id, "parked", ref);
+				const detached = this.#registry.detachSession(id, ref);
+				const parked = detached && this.#registry.setStatus(id, "parked", ref);
+				if (parked) this.commitParked(ref, Boolean(adopted.revive));
 
 				try {
 					await session.dispose();
@@ -315,6 +636,9 @@ export class AgentLifecycleManager {
 	 * cancelled (session still live) or awaited to completion before revive.
 	 */
 	async ensureLive(id: string): Promise<AgentSession> {
+		if (this.#releases.has(id)) {
+			throw new Error(`Agent "${id}" is being released and cannot accept new work.`);
+		}
 		const park = this.#parks.get(id);
 		if (park) {
 			const parked = this.#registry.get(id);
@@ -414,7 +738,11 @@ export class AgentLifecycleManager {
 	 * on-disk transcript as a fresh `parked` row. Mirrors
 	 * `finalizeSubagentLifecycle`'s genuine-kill path.
 	 */
-	async release(id: string, expected?: AgentRefExpectation, options?: { tombstone?: boolean }): Promise<boolean> {
+	async release(
+		id: string,
+		expected?: AgentRefExpectation,
+		options?: { tombstone?: boolean; reason?: "release" | "process-shutdown" },
+	): Promise<boolean> {
 		const adopted = this.#adopted.get(id);
 		const current = this.#registry.get(id);
 		const currentMatches =
@@ -435,15 +763,18 @@ export class AgentLifecycleManager {
 			await park.promise;
 		}
 
+		const live = this.#registry.get(id) === ref ? ref.session : null;
 		if (options?.tombstone) {
 			// Persist the terminal decision before detaching the session. The
 			// sidecar prevents a later discovery pass from reviving this transcript
 			// as a fresh parked ref.
 			if (ref.sessionFile) await persistAgentTombstone(ref.sessionFile);
-			this.#registry.setStatus(id, "aborted", ref);
+			if (!this.#registry.setStatus(id, "aborted", ref)) return false;
+			this.commitAborted(ref);
+			this.#registry.detachSession(id, ref);
+		} else {
+			this.#releases.set(id, ref);
 		}
-		const live = this.#registry.get(id) === ref ? ref.session : null;
-		if (options?.tombstone) this.#registry.detachSession(id, ref);
 		if (live) {
 			try {
 				await live.dispose();
@@ -451,36 +782,64 @@ export class AgentLifecycleManager {
 				logger.warn("AgentLifecycleManager.release: session dispose failed", { id, error: String(error) });
 			}
 		}
-		if (!options?.tombstone) this.#registry.unregister(id, ref);
+		if (!options?.tombstone) {
+			if (this.#releases.get(id) === ref) this.#releases.delete(id);
+			if (!this.#registry.unregister(id, ref)) return false;
+			this.commitReleased(ref, options?.reason);
+		}
 		return true;
 	}
-
-	/** Teardown everything; disposing the global manager makes its next owner a fresh instance. */
-	async dispose(deadlineAt: number = Date.now() + AGENT_RELEASE_GRACE_MS): Promise<void> {
-		this.#unsubscribe?.();
-		this.#disposed = true;
-		this.#unsubscribe = undefined;
-		const ids = [...new Set([...this.#adopted.keys(), ...this.#parks.keys()])];
+	/** Teardown every bound child; the owner, when supplied, is released by its session callback. */
+	async dispose(
+		options: { deadlineAt?: number; ownerRef?: AgentRef; beforeUnsubscribe?: () => Promise<void> | void } = {},
+	): Promise<void> {
+		if (!options.ownerRef) this.#disposed = true;
+		const deadlineAt = options.deadlineAt ?? Date.now() + AGENT_RELEASE_GRACE_MS;
+		const ownerRootInstanceId = options.ownerRef
+			? this.#publicBindings.get(options.ownerRef)?.rootInstanceId
+			: undefined;
+		const refs = new Set<AgentRef>();
+		const includeRef = (ref: AgentRef): void => {
+			if (ref === options.ownerRef) return;
+			if (options.ownerRef) {
+				const binding = this.#publicBindings.get(ref);
+				if (!ownerRootInstanceId || binding?.rootInstanceId !== ownerRootInstanceId) return;
+			}
+			refs.add(ref);
+		};
+		for (const ref of this.#publicBindings.keys()) includeRef(ref);
+		for (const adopted of this.#adopted.values()) includeRef(adopted.ref);
+		for (const park of this.#parks.values()) includeRef(park.ref);
 		await Promise.all(
-			ids.map(async id => {
-				const release = this.release(id).then(() => {});
+			[...refs].map(async ref => {
+				const release = this.release(ref.id, ref, { reason: "process-shutdown" }).then(() => {});
 				try {
 					await untilAborted(AbortSignal.timeout(Math.max(0, deadlineAt - Date.now())), () => release);
 				} catch (error) {
 					if (Date.now() >= deadlineAt) {
-						trackLateCleanup(release, { id, resource: "adopted-agent" });
+						trackLateCleanup(release, { id: ref.id, resource: "adopted-agent" });
 					}
 					logger.warn("Agent cleanup exceeded its deadline", {
-						id,
+						id: ref.id,
 						error: error instanceof Error ? error.message : String(error),
 					});
 				}
 			}),
 		);
-		this.#revivals.clear();
-		this.#parks.clear();
-		this.#persistedReviverFactory = undefined;
-		if (AgentLifecycleManager.#global === this) AgentLifecycleManager.#global = undefined;
+		try {
+			await options.beforeUnsubscribe?.();
+		} finally {
+			const hasLiveBoundRef = [...this.#publicBindings.keys()].some(ref => this.#registry.get(ref.id) === ref);
+			if (!options.ownerRef || !hasLiveBoundRef) {
+				this.#disposed = true;
+				this.#unsubscribe?.();
+				this.#unsubscribe = undefined;
+				this.#revivals.clear();
+				this.#parks.clear();
+				this.#persistedReviverFactory = undefined;
+				if (AgentLifecycleManager.#global === this) AgentLifecycleManager.#global = undefined;
+			}
+		}
 	}
 
 	async #revive(id: string, revive: AgentReviver, ref: AgentRef, adopted: AdoptedAgent): Promise<AgentSession> {
@@ -497,9 +856,12 @@ export class AgentLifecycleManager {
 		if (liveRef === ref && ref.status === "parked" && !ref.session) {
 			// A simple reviver returned a session without claiming the parked ref;
 			// attach it here while the exact ref is still revivable.
-			if (!this.#registry.attachSession(id, session, ref.sessionFile, ref)) {
+			if (
+				!this.#registry.attachSession(id, session, ref.sessionFile, ref) ||
+				!this.#registry.setStatus(id, "running", ref)
+			) {
 				await session.dispose();
-				throw new Error(`Agent "${id}" changed before its persisted session could attach.`);
+				throw new Error(`Agent "${id}" changed before its persisted session could attach and run.`);
 			}
 			liveRef = ref;
 		} else if (
@@ -515,6 +877,20 @@ export class AgentLifecycleManager {
 			// `aborted` tombstone set while revive() was in flight — is stale.
 			await session.dispose();
 			throw new Error(`Agent "${id}" was replaced or became terminal while its persisted session was reviving.`);
+		}
+		const publicEntry = this.#findPublicEntry(id);
+		if (publicEntry?.state === "parked") {
+			const identity = this.createIdentity({
+				agentId: id,
+				parentAgentId: publicEntry.agent.parentAgentId ?? undefined,
+				currentSessionId: session.sessionManager.getSessionId(),
+				kind: publicEntry.agent.kind,
+				label: publicEntry.agent.label,
+			});
+			if (!this.commitRevived(identity, liveRef)) {
+				await session.dispose();
+				throw new Error(`Agent "${id}" changed before its public lifecycle could revive.`);
+			}
 		}
 		adopted.ref = liveRef;
 		// Emits status_changed → "idle", which re-arms the TTL timer below.

@@ -20,6 +20,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
 import { createInMemoryAuthStorage } from "./helpers/agent-session-setup";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 const REASONING_TEXT = "I have partly reasoned through the implementation and should preserve this.";
 const VISIBLE_TEXT = "visible interrupted text";
@@ -255,12 +256,19 @@ describe("AgentSession interrupted thinking persistence", () => {
 			extensionRuntime,
 			"delayed-message-end",
 		);
+		const sessionManager = SessionManager.inMemory();
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"delayed-message-end",
+		);
 		const extensionRunner = new ExtensionRunner(
 			[extension],
 			extensionRuntime,
 			tempDir.path(),
-			SessionManager.inMemory(),
+			sessionManager,
 			new ModelRegistry(authStorage, path.join(tempDir.path(), "extension-models.yml")),
+			agentIdentity,
+			agentLifecycleObserver,
 		);
 		const harness = createSession(extensionRunner);
 		const persisted = Promise.withResolvers<void>();

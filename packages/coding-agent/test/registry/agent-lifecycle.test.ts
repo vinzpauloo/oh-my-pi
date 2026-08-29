@@ -403,7 +403,7 @@ describe("AgentLifecycleManager", () => {
 		lifecycle.adopt("stuck-Sub", { idleTtlMs: TTL });
 		lifecycle.adopt("sibling-Sub", { idleTtlMs: TTL });
 
-		await lifecycle.dispose(Date.now());
+		await lifecycle.dispose({ deadlineAt: Date.now() });
 
 		expect(stuck.disposeCalls()).toBe(1);
 		expect(sibling.disposeCalls()).toBe(1);
@@ -726,7 +726,7 @@ describe("AgentLifecycleManager", () => {
 
 		const revival = lifecycle.ensureLive("Cold-DisposeRace");
 		await flushAsync(); // reach the factory await
-		await lifecycle.dispose(Date.now()); // teardown while the factory is in flight
+		await lifecycle.dispose({ deadlineAt: Date.now() }); // teardown while the factory is in flight
 		gate.resolve(); // factory completes for a superseded owner
 
 		await expect(revival).rejects.toThrow(/disposed/);
@@ -765,7 +765,7 @@ describe("AgentLifecycleManager", () => {
 
 		const revival = lifecycle.ensureLive("Cold-SessionRace");
 		await flushAsync(); // reach the reviver await
-		await lifecycle.dispose(Date.now()); // teardown while the reviver is in flight
+		await lifecycle.dispose({ deadlineAt: Date.now() }); // teardown while the reviver is in flight
 		gate.resolve(); // reviver hands back a live session for a disposed owner
 
 		await expect(revival).rejects.toThrow(/disposed/);
@@ -775,7 +775,7 @@ describe("AgentLifecycleManager", () => {
 	});
 
 	it("a new top-level owner can cold-revive after the previous global lifecycle was disposed", async () => {
-		await lifecycle.dispose(Date.now());
+		await lifecycle.dispose({ deadlineAt: Date.now() });
 		const revived = makeSessionStub();
 		registry.register({
 			id: "Next-Owner",

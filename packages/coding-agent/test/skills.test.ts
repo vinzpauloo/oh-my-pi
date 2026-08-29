@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, spyOn } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -12,10 +12,12 @@ import {
 	parseSkillInvocation,
 	type Skill,
 } from "@oh-my-pi/pi-coding-agent/extensibility/skills";
-import { removeWithRetries } from "@oh-my-pi/pi-utils";
+import { getAgentDir, removeWithRetries, setAgentDir } from "@oh-my-pi/pi-utils";
 
 const fixturesDir = path.resolve(import.meta.dirname, "fixtures/skills");
 const collisionFixturesDir = path.resolve(import.meta.dirname, "fixtures/skills-collision");
+const originalAgentDir = getAgentDir();
+let isolatedAgentDir: string;
 
 const longSkillName = "this-is-a-very-long-skill-name-that-exceeds-the-sixty-four-character-limit-set-by-the-standard";
 const expectedFixtureSkillOrder: string[] = [
@@ -46,6 +48,16 @@ const DISABLE_ALL_BUILTIN_SKILLS = {
 } as const;
 
 describe("skills", () => {
+	beforeAll(async () => {
+		isolatedAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-skills-agent-"));
+		setAgentDir(isolatedAgentDir);
+	});
+
+	afterAll(async () => {
+		setAgentDir(originalAgentDir);
+		await removeWithRetries(isolatedAgentDir);
+	});
+
 	describe("loadSkillsFromDir", () => {
 		let fixtureRoot: LoadSkillsResult;
 

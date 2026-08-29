@@ -28,6 +28,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
 import { createAssistantMessage } from "./helpers/agent-session-setup";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 // Mock stream that mimics AssistantMessageEventStream
 
@@ -537,12 +538,18 @@ describe("AgentSession concurrent prompt guard", () => {
 		const sessionManager = SessionManager.inMemory();
 		const settings = Settings.isolated();
 		const modelRegistry = sharedModelRegistry;
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"slow-session-stop",
+		);
 		const extensionRunner = new ExtensionRunner(
 			[extension],
 			extensionRuntime,
 			tempDir,
 			sessionManager,
 			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
 		);
 		const extensionErrors: string[] = [];
 		extensionRunner.onError(error => extensionErrors.push(error.error));
@@ -1333,12 +1340,18 @@ describe("AgentSession TTSR resume gate", () => {
 			extensionRuntime,
 			"capture-agent-end",
 		);
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"capture-agent-end",
+		);
 		const extensionRunner = new ExtensionRunner(
 			[extension],
 			extensionRuntime,
 			tempDir,
 			sessionManager,
 			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
 		);
 
 		session = new AgentSession({

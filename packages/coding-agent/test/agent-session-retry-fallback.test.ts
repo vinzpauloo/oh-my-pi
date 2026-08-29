@@ -27,6 +27,7 @@ import type { ServingModel } from "@oh-my-pi/pi-coding-agent/session/retry-fallb
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { EventBus } from "@oh-my-pi/pi-coding-agent/utils/event-bus";
 import { TempDir } from "@oh-my-pi/pi-utils";
+import { createTestExtensionRunnerContext } from "./helpers/extension-runner-context";
 
 type AutoRetryStartEvent = Extract<AgentSessionEvent, { type: "auto_retry_start" }>;
 type AutoRetryEndEvent = Extract<AgentSessionEvent, { type: "auto_retry_end" }>;
@@ -323,7 +324,19 @@ describe("AgentSession retry fallback", () => {
 			runtime,
 			"retry-fallback-observer",
 		);
-		const extensionRunner = new ExtensionRunner([extension], runtime, tempDir.path(), sessionManager, modelRegistry);
+		const { agentIdentity, agentLifecycleObserver } = createTestExtensionRunnerContext(
+			sessionManager,
+			"retry-fallback-observer",
+		);
+		const extensionRunner = new ExtensionRunner(
+			[extension],
+			runtime,
+			tempDir.path(),
+			sessionManager,
+			modelRegistry,
+			agentIdentity,
+			agentLifecycleObserver,
+		);
 
 		session = new AgentSession({ agent, sessionManager, settings, modelRegistry, extensionRunner });
 
