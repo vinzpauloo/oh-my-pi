@@ -2,8 +2,8 @@
  * Contract: a vibe worker's spawn options carry the pre-expansion model role.
  *
  * `#resolveWorker` expands the bundled worker's role alias (`good` -> `task` ->
- * `@task`, `fast` -> `sonic` -> `@smol`) into concrete patterns, so the role
- * survives only as a separate field forwarded across `ResolvedVibeWorker` ->
+ * `@good_worker`, `fast` -> `sonic` -> `@fast_worker`) into concrete patterns,
+ * so the role survives only as a separate field forwarded across `ResolvedVibeWorker` ->
  * `VibeRecord` -> `#buildSpawnOptions` -> `runSubprocess`. The executor keys the
  * child's inherited `retry.fallbackChains` entry off it; drop any link in that
  * chain and vibe children silently retry on the `default` role's chain.
@@ -72,28 +72,28 @@ describe("vibe worker spawn model role", () => {
 		AgentRegistry.resetGlobalForTests();
 	});
 
-	it("forwards the `task` role behind the `good` worker's expanded patterns", async () => {
+	it("forwards the `good_worker` role behind the `good` worker's expanded patterns", async () => {
 		const options = await spawnAndCaptureOptions(
 			"good",
 			Settings.isolated({
-				modelRoles: { default: "anthropic/opus", task: "anthropic/sonnet" },
+				modelRoles: { default: "anthropic/opus", good_worker: "xai/grok" },
 			}),
 		);
 
-		expect(options.modelOverride).toEqual(["anthropic/sonnet"]);
-		expect(options.modelRole).toBe("task");
+		expect(options.modelOverride).toEqual(["xai/grok"]);
+		expect(options.modelRole).toBe("good_worker");
 	});
 
-	it("forwards the `smol` role behind the `fast` worker's expanded patterns", async () => {
+	it("forwards the `fast_worker` role behind the `fast` worker's expanded patterns", async () => {
 		const options = await spawnAndCaptureOptions(
 			"fast",
 			Settings.isolated({
-				modelRoles: { default: "anthropic/opus", smol: "fast/hy3" },
+				modelRoles: { default: "anthropic/opus", fast_worker: "google/gemini" },
 			}),
 		);
 
-		expect(options.modelOverride).toEqual(["fast/hy3"]);
-		expect(options.modelRole).toBe("smol");
+		expect(options.modelOverride).toEqual(["google/gemini"]);
+		expect(options.modelRole).toBe("fast_worker");
 	});
 
 	it("keeps the role identity when a per-agent model override replaces the alias", async () => {
@@ -103,7 +103,7 @@ describe("vibe worker spawn model role", () => {
 		const options = await spawnAndCaptureOptions(
 			"good",
 			Settings.isolated({
-				modelRoles: { default: "anthropic/opus", task: "anthropic/sonnet" },
+				modelRoles: { default: "anthropic/opus", good_worker: "xai/grok" },
 				"task.agentModelOverrides": { task: "openai-codex/sol" },
 			}),
 		);
@@ -114,7 +114,7 @@ describe("vibe worker spawn model role", () => {
 
 	it("vibe private lifecycle authority", async () => {
 		const settings = Settings.isolated({
-			modelRoles: { default: "anthropic/opus", task: "anthropic/sonnet" },
+			modelRoles: { default: "anthropic/opus", good_worker: "xai/grok" },
 		});
 		const privateRegistry = new AgentRegistry();
 		const privateLifecycle = new AgentLifecycleManager(privateRegistry);

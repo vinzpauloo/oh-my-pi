@@ -24,8 +24,19 @@ describe("bundled agent parsing", () => {
 		const task = getBundledAgent("task");
 
 		expect(task).toBeDefined();
-		expect(task?.model).toEqual(["@task"]);
+		expect(task?.model).toEqual(["@good_worker"]);
 		expect(task?.thinkingLevel).toBe(AUTO_THINKING);
+	});
+
+	it("parses every general built-in with its intended role alias", () => {
+		for (const [name, model] of [
+			["task", "@good_worker"],
+			["sonic", "@fast_worker"],
+			["scout", "@fast_worker"],
+			["librarian", "@fast_worker"],
+		] as const) {
+			expect(getBundledAgent(name)?.model).toEqual([model]);
+		}
 	});
 
 	// Issue #4761: with `modelRoles.slow: ...:xhigh`, the role's explicit effort
@@ -70,17 +81,18 @@ describe("bundled agent parsing", () => {
 		const settings = Settings.isolated({
 			modelRoles: {
 				default: "anthropic/opus",
-				task: "anthropic/sonnet",
-				smol: "fast/hy3",
+				good_worker: "xai/grok",
+				fast_worker: "google/gemini",
 				slow: "codex/sol",
 				designer: "anthropic/opus",
 			},
 		});
 
 		for (const [name, role, model] of [
-			["task", "task", "anthropic/sonnet"],
-			["sonic", "smol", "fast/hy3"],
-			["scout", "smol", "fast/hy3"],
+			["task", "good_worker", "xai/grok"],
+			["sonic", "fast_worker", "google/gemini"],
+			["scout", "fast_worker", "google/gemini"],
+			["librarian", "fast_worker", "google/gemini"],
 			["reviewer", "slow", "codex/sol"],
 			["designer", "designer", "anthropic/opus"],
 		] as const) {
