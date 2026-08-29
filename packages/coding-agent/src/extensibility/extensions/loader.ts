@@ -115,7 +115,11 @@ export class ExtensionRuntime implements IExtensionRuntime {
 		throw new ExtensionRuntimeNotInitializedError();
 	}
 
-	setModel(): Promise<boolean> {
+	setModel(_model: Model, _role?: string): Promise<boolean> {
+		throw new ExtensionRuntimeNotInitializedError();
+	}
+
+	getActiveModelRole(): string | undefined {
 		throw new ExtensionRuntimeNotInitializedError();
 	}
 
@@ -278,8 +282,12 @@ class ConcreteExtensionAPI implements ExtensionAPI, IExtensionRuntime {
 		return this.runtime.getCommands();
 	}
 
-	setModel(model: Model): Promise<boolean> {
-		return this.runtime.setModel(model);
+	setModel(model: Model, role?: string): Promise<boolean> {
+		return this.runtime.setModel(model, role);
+	}
+
+	getActiveModelRole(): string | undefined {
+		return this.runtime.getActiveModelRole?.();
 	}
 
 	getThinkingLevel(): ThinkingLevel | undefined {

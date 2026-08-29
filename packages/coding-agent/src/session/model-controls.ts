@@ -55,6 +55,8 @@ export interface ModelControlsHost {
 	syncAfterModelChange(previousEditMode: EditMode): Promise<void>;
 	setModelWithProviderSessionReset(model: Model): Promise<void>;
 	clearActiveRetryFallback(): void;
+	setActiveModelRole(role?: string): void;
+	getActiveModelRole(): string | undefined;
 	clearInheritedProviderPromptCacheKey(): void;
 	magicKeywordEnabled(keyword: "orchestrate" | "ultrathink" | "workflow"): boolean;
 	emit(event: AgentSessionEvent): void;
@@ -219,6 +221,7 @@ export class ModelControls {
 		const targetModel = await this.#host.modelRegistry.refreshSelectedModelMetadata(model);
 
 		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(targetModel));
+		this.#host.setActiveModelRole(role);
 		this.#host.clearActiveRetryFallback();
 		await this.#host.setModelWithProviderSessionReset(targetModel);
 		this.#host.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`, role);
@@ -264,6 +267,7 @@ export class ModelControls {
 		const targetModel = await this.#host.modelRegistry.refreshSelectedModelMetadata(model);
 
 		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(targetModel));
+		this.#host.setActiveModelRole(undefined);
 		this.#host.clearActiveRetryFallback();
 		await this.#host.setModelWithProviderSessionReset(targetModel);
 		this.#host.sessionManager.appendModelChange(
@@ -337,13 +341,11 @@ export class ModelControls {
 
 		if (models.length === 0) return undefined;
 
-		// Trust the recorded role only while its resolved model still IS the
-		// active model. A model switch through another surface (alt+m, retry
-		// fallback, /model) or a role re-configuration leaves the recorded role
-		// pointing at a model the session no longer runs; cycling from that
-		// stale slot lands on the wrong neighbor and reads as a skipped entry.
-		const lastRole = this.#host.sessionManager.getLastModelChangeRole();
-		let currentIndex = lastRole ? models.findIndex(entry => entry.role === lastRole) : -1;
+		// Trust the session-owned role only while its resolved model still IS the
+		// active model. A raw model switch or role reconfiguration can leave an
+		// older role pointing at a model the session no longer runs.
+		const activeRole = this.#host.getActiveModelRole();
+		let currentIndex = activeRole ? models.findIndex(entry => entry.role === activeRole) : -1;
 		if (currentIndex !== -1 && !modelsAreEqual(models[currentIndex].model, currentModel)) {
 			currentIndex = -1;
 		}
@@ -424,6 +426,7 @@ export class ModelControls {
 
 		// Apply model
 		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(next.model));
+		this.#host.setActiveModelRole(undefined);
 		this.#host.clearActiveRetryFallback();
 		await this.#host.setModelWithProviderSessionReset(next.model);
 		this.#host.sessionManager.appendModelChange(`${next.model.provider}/${next.model.id}`);
@@ -455,6 +458,7 @@ export class ModelControls {
 		}
 
 		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(nextModel));
+		this.#host.setActiveModelRole(undefined);
 		this.#host.clearActiveRetryFallback();
 		await this.#host.setModelWithProviderSessionReset(nextModel);
 		this.#host.sessionManager.appendModelChange(`${nextModel.provider}/${nextModel.id}`);

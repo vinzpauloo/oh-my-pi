@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "bun:test";
 import { type PendingExtensionRequest, requestRpcDialog } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
+import type { ExtensionActions } from "../src/extensibility/extensions/types";
+import { initializeExtensions } from "../src/modes/runtime-init";
+import type { AgentSession } from "../src/session/agent-session";
 
 describe("RPC extension UI", () => {
 	it("cancels the remote dialog when its signal aborts", async () => {
@@ -36,5 +39,40 @@ describe("RPC extension UI", () => {
 			targetId: request.id,
 		});
 		expect(pendingRequests.size).toBe(0);
+	});
+
+	it("forwards extension model roles and exposes the active role", async () => {
+		const model = { provider: "test", id: "model" } as never;
+		const setModel = vi.fn(async (_model: unknown, _role?: string) => {});
+		const getActiveModelRole = vi.fn(() => "vision");
+		let extensionActions: ExtensionActions | undefined;
+		const session = {
+			extensionRunner: {
+				initialize(actions: ExtensionActions) {
+					extensionActions = actions;
+				},
+				onError: vi.fn(),
+				emit: vi.fn(async () => {}),
+			},
+			modelRegistry: { getApiKey: vi.fn(async () => "test-key") },
+			setModel,
+			getActiveModelRole,
+		} as unknown as AgentSession;
+
+		await initializeExtensions(session, {
+			mode: "rpc",
+			reportSendError: vi.fn(),
+			reportRuntimeError: vi.fn(),
+		});
+
+		if (!extensionActions) throw new Error("Expected RPC extension actions");
+		await extensionActions.setModel(model, "vision");
+		await extensionActions.setModel(model);
+		expect(setModel).toHaveBeenNthCalledWith(1, model, "vision");
+		expect(setModel).toHaveBeenNthCalledWith(2, model, undefined);
+		expect(extensionActions.getActiveModelRole).toBeTypeOf("function");
+		if (!extensionActions.getActiveModelRole) throw new Error("Expected active model role handler");
+		expect(extensionActions.getActiveModelRole()).toBe("vision");
+		expect(getActiveModelRole).toHaveBeenCalledTimes(1);
 	});
 });

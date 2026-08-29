@@ -1,7 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it, type Mock, vi } from "bun:test";
 import { Container, type OverlayOptions, setKeybindings } from "@oh-my-pi/pi-tui";
 import { KeybindingsManager } from "../../../src/config/keybindings";
-import type { ExtensionAskDialogQuestion, ExtensionUIContext } from "../../../src/extensibility/extensions";
+import type {
+	ExtensionActions,
+	ExtensionAskDialogQuestion,
+	ExtensionUIContext,
+} from "../../../src/extensibility/extensions";
 import { AskDialogComponent } from "../../../src/modes/components/ask-dialog";
 import { CustomEditor } from "../../../src/modes/components/custom-editor";
 import { ExtensionUiController } from "../../../src/modes/controllers/extension-ui-controller";
@@ -18,7 +22,7 @@ beforeAll(async () => {
 	setThemeInstance(dark);
 });
 
-function makeHarness() {
+function makeHarness(sessionOverrides: Record<string, unknown> = {}) {
 	const editor = new CustomEditor(getEditorTheme());
 	const editorContainer = new Container();
 	editorContainer.addChild(editor);
@@ -44,6 +48,7 @@ function makeHarness() {
 		session: {
 			extensionRunner: undefined,
 			setUsageFallbackConfirmer: vi.fn(),
+			...sessionOverrides,
 		},
 		setToolUIContext(context: ExtensionUIContext, hasUI: boolean): void {
 			expect(hasUI).toBe(true);
@@ -70,6 +75,49 @@ function makeHarness() {
 		},
 	};
 }
+
+describe("ExtensionUiController model actions", () => {
+	it("forwards extension roles and exposes active role in both interactive action maps", async () => {
+		const model = { provider: "test", id: "model" } as never;
+		const setModel = vi.fn(async (_model: unknown, _role?: string) => {});
+		const getActiveModelRole = vi.fn(() => "vision");
+		const capturedActions: ExtensionActions[] = [];
+		const extensionRunner = {
+			initialize(actions: ExtensionActions) {
+				capturedActions.push(actions);
+			},
+			onError: vi.fn(),
+			emit: vi.fn(async () => {}),
+		};
+		const harness = makeHarness({
+			extensionRunner,
+			modelRegistry: { getApiKey: vi.fn(async () => "test-key") },
+			setModel,
+			getActiveModelRole,
+		});
+
+		await harness.init();
+		const initializedActions = capturedActions[0];
+		if (!initializedActions) throw new Error("Expected interactive extension actions");
+		await initializedActions.setModel(model, "vision");
+		await initializedActions.setModel(model);
+		expect(setModel).toHaveBeenNthCalledWith(1, model, "vision");
+		expect(setModel).toHaveBeenNthCalledWith(2, model, undefined);
+		expect(initializedActions.getActiveModelRole).toBeTypeOf("function");
+		if (!initializedActions.getActiveModelRole) throw new Error("Expected active model role handler");
+		expect(initializedActions.getActiveModelRole()).toBe("vision");
+
+		harness.controller.initializeHookRunner({} as ExtensionUIContext, true);
+		const hookActions = capturedActions[1];
+		if (!hookActions) throw new Error("Expected hook extension actions");
+		await hookActions.setModel(model, "designer");
+		expect(setModel).toHaveBeenNthCalledWith(3, model, "designer");
+		expect(hookActions.getActiveModelRole).toBeTypeOf("function");
+		if (!hookActions.getActiveModelRole) throw new Error("Expected active model role handler");
+		expect(hookActions.getActiveModelRole()).toBe("vision");
+		expect(getActiveModelRole).toHaveBeenCalledTimes(2);
+	});
+});
 
 describe("ExtensionUiController editor UI", () => {
 	it("requests a render after extension pasteToEditor mutates the prompt", async () => {

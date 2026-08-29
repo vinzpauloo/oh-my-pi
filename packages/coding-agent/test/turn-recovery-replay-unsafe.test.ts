@@ -103,6 +103,10 @@ describe("TurnRecovery replay-unsafe output classification", () => {
 		tempDir.removeSync();
 	});
 
+	it("constructs a lightweight host without an initial role", () => {
+		expect(() => new TurnRecovery(createHost(model, modelRegistry))).not.toThrow();
+	});
+
 	it("rolls back a usage fallback cancelled during model reconciliation", async () => {
 		const fallback = getBundledModel("openai", "gpt-4o-mini");
 		if (!fallback) throw new Error("Expected bundled fallback model");

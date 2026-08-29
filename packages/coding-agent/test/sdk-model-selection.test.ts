@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Effort, type FetchImpl } from "@oh-my-pi/pi-ai";
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { writeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -1287,5 +1288,101 @@ describe("createAgentSession deferred model pattern resolution", () => {
 		// silently escape the scope the user just asked for.
 		expect(cliOptions.model?.provider).toBe(scopedTarget.provider);
 		expect(cliOptions.model?.id).toBe(scopedTarget.id);
+	});
+	test("keeps a depleted configured VISION startup on its remaining role-owned chain", async () => {
+		const fable = getBundledModel("anthropic", "claude-fable-5");
+		const opus = getBundledModel("anthropic", "claude-opus-5");
+		const gemini = getBundledModel("google-antigravity", "gemini-3.7-flash");
+		if (!fable || !opus || !gemini) {
+			throw new Error("Expected bundled VISION models");
+		}
+		const fableSelector = `${fable.provider}/${fable.id}`;
+		const opusSelector = `${opus.provider}/${opus.id}`;
+		const geminiSelector = `${gemini.provider}/${gemini.id}`;
+		const authStorage = createInMemoryAuthStorage();
+		authStoragesToClose.push(authStorage);
+		authStorage.setRuntimeApiKey(fable.provider, "anthropic-test-key");
+		authStorage.setRuntimeApiKey(gemini.provider, "google-antigravity-test-key");
+		const modelRegistry = new ModelRegistry(authStorage, path.join(tempDir, "vision-startup-models.yml"));
+		const usageHealth = vi
+			.spyOn(authStorage, "getModelUsageHealth")
+			.mockImplementation(async (_provider, options) =>
+				options.modelId === fable.id
+					? { state: "depleted", accounts: [{ credentialId: 1, credentialType: "oauth", state: "depleted" }] }
+					: { state: "healthy", accounts: [{ credentialId: 2, credentialType: "oauth", state: "healthy" }] },
+			);
+		const settings = Settings.isolated({
+			"compaction.enabled": false,
+			"retry.baseDelayMs": 1,
+			"retry.maxRetries": 2,
+			"retry.usageAwareFallback": true,
+			"retry.usageReservePolicy": "confirm",
+			"retry.fallbackChains": {
+				vision: [`${opusSelector}:xhigh`, `${geminiSelector}:high`],
+			},
+		});
+		settings.setModelRole("vision", `${fableSelector}:xhigh`);
+
+		const { session } = await createAgentSession({
+			cwd: tempDir,
+			agentDir: tempDir,
+			authStorage,
+			modelRegistry,
+			settings,
+			sessionManager: SessionManager.inMemory(),
+			modelPattern: "vision",
+			disableExtensionDiscovery: true,
+			skills: [],
+			contextFiles: [],
+			promptTemplates: [],
+			slashCommands: [],
+			enableMCP: false,
+			enableLsp: false,
+			skipPythonPreflight: true,
+			rules: [],
+			preloadedCustomToolPaths: [],
+			toolNames: ["read"],
+			hasUI: false,
+		});
+
+		try {
+			expect(usageHealth).toHaveBeenCalledWith(fable.provider, expect.objectContaining({ modelId: fable.id }));
+			expect(session.model?.provider).toBe(opus.provider);
+			expect(session.model?.id).toBe(opus.id);
+			expect(session.getActiveModelRole()).toBe("vision");
+
+			const requestedModels: string[] = [];
+			const appliedRoles: string[] = [];
+			const succeededRoles: string[] = [];
+			const mock = createMockModel();
+			session.agent.streamFn = (model, context, options) => {
+				const requested = `${model.provider}/${model.id}`;
+				requestedModels.push(requested);
+				if (requested === opusSelector) {
+					mock.push({ throw: "overloaded_error: provider returned error 503" });
+				} else if (requested === geminiSelector) {
+					mock.push({ content: ["startup VISION chain recovered"] });
+				} else {
+					throw new Error(`Unexpected startup VISION model: ${requested}`);
+				}
+				return mock.stream(model, context, options);
+			};
+			session.subscribe(event => {
+				if (event.type === "retry_fallback_applied") appliedRoles.push(event.role);
+				if (event.type === "retry_fallback_succeeded") succeededRoles.push(event.role);
+			});
+
+			await session.prompt("Continue the startup VISION chain");
+			await session.waitForIdle();
+
+			expect(requestedModels).toEqual([opusSelector, geminiSelector]);
+			expect(appliedRoles).toEqual(["vision"]);
+			expect(succeededRoles).toEqual(["vision"]);
+			expect(session.model?.provider).toBe(gemini.provider);
+			expect(session.model?.id).toBe(gemini.id);
+			expect(session.getActiveModelRole()).toBe("vision");
+		} finally {
+			await session.dispose();
+		}
 	});
 });

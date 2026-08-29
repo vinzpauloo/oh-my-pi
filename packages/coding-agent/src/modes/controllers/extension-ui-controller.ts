@@ -169,12 +169,13 @@ export class ExtensionUiController {
 			getActiveTools: () => this.ctx.session.getEnabledToolNames(),
 			getAllTools: () => this.ctx.session.getAllToolInfos(),
 			setActiveTools: toolNames => this.ctx.session.setActiveToolsByName(toolNames),
-			setModel: async model => {
+			setModel: async (model, role) => {
 				const key = await this.ctx.session.modelRegistry.getApiKey(model);
 				if (!key) return false;
-				await this.ctx.session.setModel(model);
+				await this.ctx.session.setModel(model, role);
 				return true;
 			},
+			getActiveModelRole: () => this.ctx.session.getActiveModelRole(),
 			getThinkingLevel: () => this.ctx.session.thinkingLevel,
 			setThinkingLevel: level => this.ctx.session.setThinkingLevel(level),
 			getServiceTiers: () => this.ctx.session.serviceTierByFamily,
@@ -402,12 +403,13 @@ export class ExtensionUiController {
 			getActiveTools: () => this.ctx.session.getEnabledToolNames(),
 			getAllTools: () => this.ctx.session.getAllToolInfos(),
 			setActiveTools: toolNames => this.ctx.session.setActiveToolsByName(toolNames),
-			setModel: async model => {
+			setModel: async (model, role) => {
 				const key = await this.ctx.session.modelRegistry.getApiKey(model);
 				if (!key) return false;
-				await this.ctx.session.setModel(model);
+				await this.ctx.session.setModel(model, role);
 				return true;
 			},
+			getActiveModelRole: () => this.ctx.session.getActiveModelRole(),
 			getThinkingLevel: () => this.ctx.session.thinkingLevel,
 			setThinkingLevel: (level, persist) => this.ctx.session.setThinkingLevel(level, persist),
 			getServiceTiers: () => this.ctx.session.serviceTierByFamily,

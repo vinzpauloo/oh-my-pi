@@ -172,6 +172,7 @@ export interface TurnRecoveryHost {
 /** Construction-time retry state restored from model selection. */
 export interface TurnRecoveryOptions {
 	initialRetryFallback?: InitialRetryFallbackState;
+	initialModelRole?: string;
 }
 
 type PendingRetryError = {
@@ -196,6 +197,7 @@ export class TurnRecovery {
 	#retryPromise: Promise<void> | undefined;
 	#retryResolve: (() => void) | undefined;
 	#activeRetryFallback: ActiveRetryFallbackState | undefined;
+	#activeModelRoles = new Map<string, string>();
 	#usageReserveApprovedSelector: string | undefined;
 	#pendingRetryErrors: PendingRetryError[] = [];
 	#usageLimitOutcomes = new WeakMap<AssistantMessage, Promise<UsageLimitOutcome>>();
@@ -232,6 +234,8 @@ export class TurnRecovery {
 
 	constructor(host: TurnRecoveryHost, options: TurnRecoveryOptions = {}) {
 		this.#host = host;
+		const initialModelRole = options.initialRetryFallback?.role ?? options.initialModelRole;
+		if (initialModelRole !== undefined) this.setActiveModelRole(initialModelRole);
 		if (options.initialRetryFallback) {
 			this.#activeRetryFallback = {
 				...options.initialRetryFallback,
@@ -262,6 +266,21 @@ export class TurnRecovery {
 
 	#markFallbackRouted(): void {
 		this.#fallbackRoutedFor = this.#host.sessionManager.getSessionId();
+	}
+
+	/** Binds the active model role to the current session id. */
+	setActiveModelRole(role?: string): void {
+		const sessionId = this.#host.sessionManager.getSessionId();
+		if (role === undefined) {
+			this.#activeModelRoles.delete(sessionId);
+		} else {
+			this.#activeModelRoles.set(sessionId, role);
+		}
+	}
+
+	/** Returns the active model role owned by the current session id. */
+	getActiveModelRole(): string | undefined {
+		return this.#activeModelRoles.get(this.#host.sessionManager.getSessionId());
 	}
 
 	/**
@@ -1313,11 +1332,15 @@ export class TurnRecovery {
 		currentModel: Model | null | undefined = this.#host.model(),
 		roleHint?: string,
 	): string | undefined {
+		const activeRole =
+			roleHint === undefined && "sessionManager" in this.#host && this.#host.sessionManager !== undefined
+				? this.getActiveModelRole()
+				: roleHint;
 		return resolveRetryFallbackChainKey(
 			this.#getRetryFallbackResolutionContext(),
 			currentSelector,
 			currentModel,
-			roleHint,
+			activeRole,
 		);
 	}
 

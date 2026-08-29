@@ -1408,8 +1408,11 @@ export interface ExtensionAPI {
 	/** Get available slash commands in the current session. */
 	getCommands(): SlashCommandInfo[];
 
-	/** Set the current model. Returns false if no API key available. */
-	setModel(model: Model): Promise<boolean>;
+	/** Set the current model, optionally binding it to a model role. Returns false if no API key is available. */
+	setModel(model: Model, role?: string): Promise<boolean>;
+
+	/** Get the active model role for the current session, if one is bound. */
+	getActiveModelRole(): string | undefined;
 
 	/** Get current thinking level. */
 	getThinkingLevel(): ThinkingLevel | undefined;
@@ -1613,7 +1616,9 @@ export type GetCommandsHandler = () => SlashCommandInfo[];
 
 export type SetActiveToolsHandler = (toolNames: string[]) => Promise<void>;
 
-export type SetModelHandler = (model: Model) => Promise<boolean>;
+export type SetModelHandler = (model: Model, role?: string) => Promise<boolean>;
+
+export type GetActiveModelRoleHandler = () => string | undefined;
 
 export type GetThinkingLevelHandler = () => ThinkingLevel | undefined;
 
@@ -1645,6 +1650,7 @@ export interface ExtensionActions {
 	setActiveTools: SetActiveToolsHandler;
 	getCommands: GetCommandsHandler;
 	setModel: SetModelHandler;
+	getActiveModelRole?: GetActiveModelRoleHandler;
 	getThinkingLevel: GetThinkingLevelHandler;
 	setThinkingLevel: SetThinkingLevelHandler;
 	getServiceTiers?: GetServiceTiersHandler;

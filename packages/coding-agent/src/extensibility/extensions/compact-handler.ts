@@ -24,7 +24,7 @@ export async function runExtensionCompact(
 
 interface SetModelCapableSession {
 	modelRegistry: { getApiKey(model: Model): Promise<string | undefined> };
-	setModel(model: Model): Promise<unknown>;
+	setModel(model: Model, role?: string): Promise<unknown>;
 }
 
 /**
@@ -32,9 +32,13 @@ interface SetModelCapableSession {
  *
  * Returns false when no API key is available for the requested model.
  */
-export async function runExtensionSetModel(session: SetModelCapableSession, model: Model): Promise<boolean> {
+export async function runExtensionSetModel(
+	session: SetModelCapableSession,
+	model: Model,
+	role?: string,
+): Promise<boolean> {
 	const key = await session.modelRegistry.getApiKey(model);
 	if (!key) return false;
-	await session.setModel(model);
+	await session.setModel(model, role);
 	return true;
 }

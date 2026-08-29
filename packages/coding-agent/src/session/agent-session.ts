@@ -1057,6 +1057,8 @@ export class AgentSession {
 			syncAfterModelChange: previousEditMode => this.#tools.syncAfterModelChange(previousEditMode),
 			setModelWithProviderSessionReset: model => this.#setModelWithProviderSessionReset(model),
 			clearActiveRetryFallback: () => this.#recovery.clearActiveRetryFallback(),
+			setActiveModelRole: role => this.#recovery.setActiveModelRole(role),
+			getActiveModelRole: () => this.#recovery.getActiveModelRole(),
 			clearInheritedProviderPromptCacheKey: () => this.#clearInheritedProviderPromptCacheKey(),
 			magicKeywordEnabled: keyword => this.#magicKeywordEnabled(keyword),
 			emit: event => this.#emit(event),
@@ -1107,7 +1109,10 @@ export class AgentSession {
 				this.#maintenance.runAutoCompaction(reason, willRetry, deferred, allowDefer, options),
 			withBashBranchTransition: operation => this.#bash.withBranchTransition(operation),
 		};
-		this.#recovery = new TurnRecovery(recoveryHost, { initialRetryFallback: config.initialRetryFallback });
+		this.#recovery = new TurnRecovery(recoveryHost, {
+			initialRetryFallback: config.initialRetryFallback,
+			initialModelRole: config.initialModelRole,
+		});
 		this.#detachUsageBeforeQueueDequeue = this.agent.addBeforeQueuedMessageDequeueHook(async signal => {
 			if (
 				!this.settings.get("retry.usageAwareFallback") ||
@@ -6936,6 +6941,16 @@ export class AgentSession {
 		},
 	): Promise<{ switched: boolean }> {
 		return this.#models.setModel(model, role, options);
+	}
+
+	/** Binds a configured model role to the current session's live model. */
+	setActiveModelRole(role?: string): void {
+		this.#recovery.setActiveModelRole(role);
+	}
+
+	/** Returns the configured role that owns the current session's live model. */
+	getActiveModelRole(): string | undefined {
+		return this.#recovery.getActiveModelRole();
 	}
 
 	/** Selects a model for this session without updating persisted model settings. */

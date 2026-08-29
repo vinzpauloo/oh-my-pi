@@ -2362,14 +2362,15 @@ export class AcpAgent implements Agent {
 				getAllTools: () => record.session.getAllToolInfos(),
 				setActiveTools: toolNames => record.session.setActiveToolsByName(toolNames),
 				getCommands: () => getSessionSlashCommands(record.session),
-				setModel: async model => {
+				setModel: async (model, role) => {
 					const apiKey = await record.session.modelRegistry.getApiKey(model);
 					if (!apiKey) {
 						return false;
 					}
-					await record.session.setModel(model);
+					await record.session.setModel(model, role);
 					return true;
 				},
+				getActiveModelRole: () => record.session.getActiveModelRole(),
 				getThinkingLevel: () => record.session.thinkingLevel,
 				setThinkingLevel: level => record.session.setThinkingLevel(level),
 				getServiceTiers: () => record.session.serviceTierByFamily,

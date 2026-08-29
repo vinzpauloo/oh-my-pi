@@ -1424,6 +1424,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 	let model = options.model;
 	let modelFallbackMessage: string | undefined;
 	let initialRetryFallback: InitialRetryFallbackState | undefined;
+	let initialModelRole: string | undefined;
 	// Identify session model strings to restore in fallback order. We do an
 	// initial pass here so model-dependent setup (thinking-level resolution,
 	// host preconnect) can use the restored model; extension-registered
@@ -2180,13 +2181,16 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 						settings,
 						preferences: matchPreferences,
 					});
+					const modelRole = resolved.configuredRole ?? options.modelPatternFallbackRole;
 					if (resolved.configuredPatterns && resolved.configuredPatterns.length > 0) {
 						const primaryPatterns: Array<{
 							pattern: string;
 							retryFallback: InitialRetryFallbackState | undefined;
+							modelRole: string | undefined;
 						}> = resolved.configuredPatterns.map(pattern => ({
 							pattern,
 							retryFallback: undefined,
+							modelRole,
 						}));
 						if (!resolved.configuredRole || !settings.get("retry.modelFallback")) {
 							return primaryPatterns;
@@ -2224,7 +2228,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 							...primaryPatterns,
 							...findRetryFallbackCandidates(fallbackContext, chainKey, originalSelector, originalModel, {
 								allowMissingPrimary: true,
-							}).map(candidate => ({ pattern: candidate.raw, retryFallback })),
+							}).map(candidate => ({ pattern: candidate.raw, retryFallback, modelRole })),
 						];
 					}
 					if (resolved.model) {
@@ -2235,12 +2239,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 									resolved.thinkingLevel,
 								),
 								retryFallback: undefined,
+								modelRole,
 							},
 						];
 					}
 					return resolveConfiguredModelPatterns([trimmedSelector], settings).map(pattern => ({
 						pattern,
 						retryFallback: undefined,
+						modelRole: options.modelPatternFallbackRole,
 					}));
 				}),
 			);
@@ -2251,7 +2257,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				: allModels;
 			let usageFallbackTriggered = false;
 			for (let patternIndex = 0; patternIndex < expandedModelPatterns.length; patternIndex += 1) {
-				const { pattern, retryFallback } = expandedModelPatterns[patternIndex];
+				const { pattern, retryFallback, modelRole } = expandedModelPatterns[patternIndex];
 				const primary = parseModelPattern(pattern, resolutionModels, matchPreferences);
 				if (!primary.model || (retryFallback && !hasModelAuth(primary.model))) continue;
 				let hasUsageFallbackCandidate = false;
@@ -2398,6 +2404,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				model = selectedModel;
 				initialRetryFallback =
 					retryFallback && usageFallbackTriggered ? { ...retryFallback, pinned: true } : retryFallback;
+				initialModelRole = initialRetryFallback?.role ?? modelRole;
 				modelFallbackMessage = undefined;
 				if (selectedExplicitThinkingLevel) {
 					restoredSessionThinkingLevel = selectedThinkingLevel;
@@ -3413,6 +3420,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			thinkingLevel: autoThinking ? AUTO_THINKING : effectiveThinkingLevel,
 			thinkingLevelCeiling: options.thinkingLevelCeiling,
 			initialRetryFallback,
+			initialModelRole,
 			prewalk: options.prewalk,
 			planYolo: options.planYolo,
 			serviceTierByFamily: initialServiceTierByFamily,

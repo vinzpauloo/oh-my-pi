@@ -11,6 +11,7 @@ import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { runExtensionSetModel } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler";
 import { ExtensionRuntime, loadExtensions } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/loader";
 import {
 	EXTENSION_HANDLER_TIMEOUT_MS,
@@ -2022,6 +2023,207 @@ describe("ExtensionRunner", () => {
 				searchable: true,
 			});
 			delete globalState.__ompMemoryStatus;
+		});
+	});
+
+	describe("model role API", () => {
+		it("keeps one-argument switches compatible and forwards explicit roles and active-role reads", async () => {
+			const model = getBundledModel("anthropic", "claude-sonnet-4-5");
+			if (!model) throw new Error("Expected bundled Anthropic model to exist");
+			const globalState = globalThis as typeof globalThis & {
+				__ompExtensionRoleModel?: typeof model;
+				__ompExtensionRoleResults?: unknown[];
+			};
+			globalState.__ompExtensionRoleModel = model;
+			delete globalState.__ompExtensionRoleResults;
+			const explicitExtensionPath = path.join(tempDir.path(), "model-role-api.ts");
+			await Bun.write(
+				explicitExtensionPath,
+				`
+					export default function(pi) {
+						pi.on("session_start", async () => {
+							const model = globalThis.__ompExtensionRoleModel;
+							const defaultResult = await pi.setModel(model);
+							const visionResult = await pi.setModel(model, "vision");
+							globalThis.__ompExtensionRoleResults = [
+								defaultResult,
+								visionResult,
+								pi.getActiveModelRole(),
+							];
+						});
+					}
+				`,
+			);
+			const calls: Array<{ model: typeof model; role?: string }> = [];
+			let activeRole: string | undefined = "default";
+
+			try {
+				const result = await loadTestExtensions([explicitExtensionPath]);
+				const runner = new ExtensionRunner(
+					result.extensions,
+					result.runtime,
+					tempDir.path(),
+					sessionManager,
+					modelRegistry,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+					createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
+				);
+				runner.initialize(
+					{
+						sendMessage: () => {},
+						sendUserMessage: () => {},
+						appendEntry: () => {},
+						setLabel: () => {},
+						getActiveTools: () => [],
+						getAllTools: () => [],
+						setActiveTools: async () => {},
+						getCommands: () => [],
+						setModel: async (nextModel, role) => {
+							calls.push({ model: nextModel, role });
+							activeRole = role ?? "default";
+							return true;
+						},
+						getActiveModelRole: () => activeRole,
+						getThinkingLevel: () => undefined,
+						setThinkingLevel: () => {},
+						getSessionName: () => undefined,
+						setSessionName: async () => {},
+					},
+					{
+						getModel: () => undefined,
+						isIdle: () => true,
+						abort: () => {},
+						hasPendingMessages: () => false,
+						shutdown: () => {},
+						getContextUsage: () => undefined,
+						compact: async () => {},
+						getSystemPrompt: () => [],
+					},
+				);
+
+				await runner.emit({ type: "session_start" });
+
+				const roleResults: unknown = (globalThis as Record<string, unknown>).__ompExtensionRoleResults;
+				expect(Array.isArray(roleResults)).toBe(true);
+				if (!Array.isArray(roleResults)) {
+					throw new Error("Expected extension role results to be an array");
+				}
+				expect(roleResults).toHaveLength(3);
+				expect(calls).toEqual([
+					{ model, role: undefined },
+					{ model, role: "vision" },
+				]);
+				expect(roleResults[0]).toBe(true);
+				expect(roleResults[1]).toBe(true);
+				expect(roleResults[2]).toBe("vision");
+			} finally {
+				delete globalState.__ompExtensionRoleModel;
+				delete globalState.__ompExtensionRoleResults;
+			}
+		});
+
+		it("returns undefined when initialized by a host that predates the active-role handler", async () => {
+			const extensionPath = path.join(tempDir.path(), "legacy-model-role-host.ts");
+			await Bun.write(
+				extensionPath,
+				`
+					export default function(pi) {
+						pi.on("session_start", () => {
+							globalThis.__ompLegacyActiveModelRole = pi.getActiveModelRole();
+						});
+					}
+				`,
+			);
+			const globalState = globalThis as typeof globalThis & { __ompLegacyActiveModelRole?: string };
+			delete globalState.__ompLegacyActiveModelRole;
+			const result = await loadTestExtensions([extensionPath]);
+			const runner = new ExtensionRunner(
+				result.extensions,
+				result.runtime,
+				tempDir.path(),
+				sessionManager,
+				modelRegistry,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentIdentity,
+				createTestExtensionRunnerContext(sessionManager, "extensions-runner").agentLifecycleObserver,
+			);
+			runner.initialize(
+				{
+					sendMessage: () => {},
+					sendUserMessage: () => {},
+					appendEntry: () => {},
+					setLabel: () => {},
+					getActiveTools: () => [],
+					getAllTools: () => [],
+					setActiveTools: async () => {},
+					getCommands: () => [],
+					setModel: async () => false,
+					getThinkingLevel: () => undefined,
+					setThinkingLevel: () => {},
+					getSessionName: () => undefined,
+					setSessionName: async () => {},
+				},
+				{
+					getModel: () => undefined,
+					isIdle: () => true,
+					abort: () => {},
+					hasPendingMessages: () => false,
+					shutdown: () => {},
+					getContextUsage: () => undefined,
+					compact: async () => {},
+					getSystemPrompt: () => [],
+				},
+			);
+
+			await runner.emit({ type: "session_start" });
+
+			expect(Object.hasOwn(globalState, "__ompLegacyActiveModelRole")).toBe(true);
+			expect(globalState.__ompLegacyActiveModelRole).toBeUndefined();
+			delete globalState.__ompLegacyActiveModelRole;
+		});
+
+		it("keeps model and role unchanged when credentials are missing", async () => {
+			const initialModel = getBundledModel("openai-codex", "gpt-5.6-sol");
+			const requestedModel = getBundledModel("anthropic", "claude-sonnet-4-5");
+			if (!initialModel || !requestedModel) throw new Error("Expected bundled cross-provider models to exist");
+			let currentModel: typeof initialModel | typeof requestedModel = initialModel;
+			let activeRole = "default";
+			let setCalls = 0;
+
+			const switched = await runExtensionSetModel(
+				{
+					modelRegistry: { getApiKey: async () => undefined },
+					setModel: async (model, role) => {
+						setCalls++;
+						currentModel = model;
+						activeRole = role ?? "default";
+					},
+				},
+				requestedModel,
+				"vision",
+			);
+
+			expect(switched).toBe(false);
+			expect(setCalls).toBe(0);
+			expect(currentModel).toBe(initialModel);
+			expect(activeRole).toBe("default");
+		});
+
+		it("keeps active-role reads unavailable during extension load", async () => {
+			const extensionPath = path.join(tempDir.path(), "model-role-load.ts");
+			await Bun.write(
+				extensionPath,
+				`
+					export default function(pi) {
+						pi.getActiveModelRole();
+					}
+				`,
+			);
+
+			const result = await loadTestExtensions([extensionPath]);
+			const loadError = result.errors.find(error => error.path.includes("model-role-load.ts"));
+
+			expect(loadError).toBeDefined();
+			expect(loadError?.error).toContain("Extension runtime not initialized");
 		});
 	});
 
