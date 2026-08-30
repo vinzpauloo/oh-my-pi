@@ -149,8 +149,8 @@ async function probeCdpAt(port: number, signal?: AbortSignal): Promise<boolean> 
 
 /**
  * If any running instance of `exe` was launched with `--remote-debugging-port`
- * and that endpoint actually answers, return it so attach can reuse it instead
- * of killing and respawning. Idempotent re-attaches are the common case.
+ * and that endpoint actually answers, return it so attach can reuse it.
+ * Idempotent re-attaches are the common case.
  */
 export async function findReusableCdp(
 	exe: string,
@@ -258,17 +258,16 @@ export async function gracefulKillTreeOnce(pid: number, gracePeriodMs = 2000): P
 }
 
 /**
- * Multi-process variant for attach: find every PID running `executablePath`
- * (single-instance apps may keep an orphan around) and tear them all down.
+ * Refuse to take ownership of an executable that already has a live process.
+ * A spawned browser may only terminate the exact child PID it created.
  */
-export async function killExistingByPath(executablePath: string, signal?: AbortSignal): Promise<number> {
-	const processes = Process.fromPath(executablePath);
-	if (!processes.length) return 0;
-	const results = await Promise.all(
-		processes.map(async process => {
-			throwIfAborted(signal);
-			return await process.terminate({ gracefulMs: 3000, timeoutMs: 1000 });
-		}),
+export function assertNoExistingProcessByPath(executablePath: string, signal?: AbortSignal): void {
+	throwIfAborted(signal);
+	const pids = Process.fromPath(executablePath)
+		.filter(process => process.status() === ProcessStatus.Running)
+		.map(process => process.pid);
+	if (!pids.length) return;
+	throw new ToolError(
+		`Refusing to launch ${JSON.stringify(executablePath)} because ${pids.length} existing process(es) use that executable (PIDs: ${pids.join(", ")}). The browser tool never terminates pre-existing apps; use app.cdp_url, app.relay, or an isolated executable such as Chrome for Testing.`,
 	);
-	return results.length;
 }

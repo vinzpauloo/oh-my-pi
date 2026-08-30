@@ -3,6 +3,7 @@ import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { ToolSession } from "@oh-my-pi/pi-coding-agent/sdk";
 import { BrowserTool } from "@oh-my-pi/pi-coding-agent/tools/browser";
 import {
+	assertNoExistingProcessByPath,
 	findFreeCdpPort,
 	pickElectronTarget,
 	probeCdpStatus,
@@ -125,6 +126,39 @@ describe("pickElectronTarget", () => {
 	test("preserves connected-browser focus only for automatic target selection", () => {
 		expect(shouldPreserveConnectedBrowserFocus()).toBe(true);
 		expect(shouldPreserveConnectedBrowserFocus("example.com")).toBe(false);
+	});
+
+	test("refuses to terminate a pre-existing same-path process", () => {
+		expect(() => assertNoExistingProcessByPath(process.execPath)).toThrow(
+			/The browser tool never terminates pre-existing apps/,
+		);
+	});
+
+	test("does not kill a reused CDP process on release", async () => {
+		const child = Bun.spawn([process.execPath, "-e", "console.log('ready'); await Promise.withResolvers().promise"], {
+			stdout: "pipe",
+			stderr: "ignore",
+		});
+		const reader = child.stdout.getReader();
+		try {
+			const started = await reader.read();
+			expect(new TextDecoder().decode(started.value)).toContain("ready");
+			const handle: BrowserHandle = {
+				key: `reused-spawned:${child.pid}`,
+				kind: { kind: "spawned", path: process.execPath },
+				browser: { connected: false } as Browser,
+				cdpUrl: "http://127.0.0.1:1",
+				pid: child.pid,
+				refCount: 1,
+				stealth: { browserSession: null, override: null },
+			};
+			await releaseBrowser(handle, { kill: true });
+			expect(() => process.kill(child.pid, 0)).not.toThrow();
+		} finally {
+			reader.releaseLock();
+			child.kill();
+			await child.exited;
+		}
 	});
 
 	test("rejects websocket cdp_url values with an actionable diagnostic", () => {
