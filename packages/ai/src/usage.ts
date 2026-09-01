@@ -379,8 +379,17 @@ export interface CredentialRankingStrategy {
 	 *
 	 * A provider that scopes backoff by model family must implement this, or a
 	 * block written under one scope is invisible to requests and to healing.
+	 * Implementing it also opts the provider into healing: a persisted block is
+	 * dropped early when a fresh live usage report shows the scope recovered.
 	 */
 	blockScopes?(context?: CredentialRankingContext): string[];
+	/**
+	 * A representative request context gated by `blockScope`, so healing —
+	 * which runs with no request — can narrow a live report to the meters that
+	 * scope covers via `scopeLimits`. Return undefined for a scope that must be
+	 * judged by the whole report (e.g. a legacy catch-all scope).
+	 */
+	blockScopeContext?(blockScope: string): CredentialRankingContext | undefined;
 	/** Fallback window durations (ms) when limits don't specify durationMs. */
 	windowDefaults: {
 		primaryMs: number;

@@ -1091,6 +1091,9 @@ function resolveDefaultRankingStrategy(provider: Provider): CredentialRankingStr
 	return DEFAULT_RANKING_STRATEGIES.get(provider);
 }
 
+/** A strategy that enumerates its backoff scopes, and so opts into usage-block healing. */
+type UsageBlockHealingStrategy = CredentialRankingStrategy & Required<Pick<CredentialRankingStrategy, "blockScopes">>;
+
 function parseUsageCacheEntry<T>(raw: string): UsageCacheEntry<T> | undefined {
 	try {
 		const parsed = JSON.parse(raw) as { value?: T; expiresAt?: unknown };
@@ -3323,6 +3326,13 @@ export class AuthStorage {
 		if (inFlight) return inFlight;
 		const promise = (async () => {
 			const report = await this.#fetchUsageUncached(request, timeoutMs);
+			// Healing keys off the credential's own block, not the cache: a sibling's
+			// heal bumps the epoch mid-flight (deleting its block invalidates the
+			// provider's cached reports), and a report fetched before that bump is
+			// still fresh evidence for this credential. Blocks younger than one
+			// usage-cache window are protected by the reconcile-after guard, so a
+			// report that predates a new 429 cannot clear it.
+			if (report !== null) this.#reconcileUsageBlock(request, report);
 			if (usageCacheEpoch !== this.#usageCacheEpoch) return report;
 			const ttlJitter = USAGE_REPORT_TTL_MS * (Math.random() * 0.5 - 0.25);
 			if (report !== null) {
@@ -3333,7 +3343,6 @@ export class AuthStorage {
 				// times decorrelate within a few cycles.
 				this.#usageCache.set(cacheKey, { value: report, expiresAt: Date.now() + USAGE_REPORT_TTL_MS + ttlJitter });
 				this.#recordUsageHistory(request, report);
-				this.#reconcileCodexUsageBlock(request, report);
 				return report;
 			}
 			// Failure: apply a short jittered cool-down so the credential doesn't
@@ -3815,7 +3824,7 @@ export class AuthStorage {
 			if (storeHook) {
 				const report = await storeHook(provider, credential, options?.signal);
 				if (report) {
-					this.#reconcileCodexUsageBlock(
+					this.#reconcileUsageBlock(
 						this.#buildUsageRequestForOauth(provider, credential, options?.baseUrl),
 						report,
 					);
@@ -3912,6 +3921,9 @@ export class AuthStorage {
 		const planEligibilityByCredential = new Map<number, boolean | undefined>();
 		const blockScope = strategy.blockScope?.(rankingContext);
 		const blockScopes = strategy.blockScopes?.(rankingContext) ?? (blockScope ? [blockScope] : []);
+		// Blocked accounts of a healing provider are still polled so a stale block
+		// can clear in this pass; others are reported depleted without a fetch.
+		const healsUsageBlocks = this.#healsUsageBlocks(strategy);
 		const reserveFraction = Number.isFinite(options.reserveFraction)
 			? Math.max(0, Math.min(1, options.reserveFraction))
 			: 0;
@@ -3921,7 +3933,7 @@ export class AuthStorage {
 				const credentialType = entry.credential.type;
 				const providerKey = this.#getProviderTypeKey(provider, credentialType);
 				let blockedUntil = this.#getCredentialBlockedUntil(provider, providerKey, index, blockScopes);
-				if (blockedUntil !== undefined && provider !== "openai-codex") {
+				if (blockedUntil !== undefined && !healsUsageBlocks) {
 					return {
 						credentialId: entry.id,
 						credentialType,
@@ -3948,7 +3960,7 @@ export class AuthStorage {
 					planEligibilityByCredential.set(entry.id, getOpenAICodexPlanEligibility(report, planRequirement));
 				}
 
-				if (provider === "openai-codex") {
+				if (healsUsageBlocks) {
 					blockedUntil = this.#getCredentialBlockedUntil(provider, providerKey, index, blockScopes);
 				}
 				if (blockedUntil !== undefined) {
@@ -4085,7 +4097,7 @@ export class AuthStorage {
 				this.#usageReportsInFlight.set(overrideKey, shared);
 			}
 			const reports = await raceUsageWithSignal(shared, options?.signal);
-			if (shouldReconcileStoreHookReports && reports) this.#reconcileCodexUsageBlocksFromReports(reports);
+			if (shouldReconcileStoreHookReports && reports) this.#reconcileUsageBlocksFromReports(reports);
 			return reports;
 		}
 		if (!this.#usageProviderResolver) return null;
@@ -4634,7 +4646,7 @@ export class AuthStorage {
 				);
 				let usage: UsageReport | null = null;
 				let usageChecked = false;
-				if (blockedUntil !== undefined && args.provider === "openai-codex") {
+				if (blockedUntil !== undefined && this.#healsUsageBlocks(strategy)) {
 					usage = await this.#getUsageReport(args.provider, selection.credential, {
 						...args.options,
 						timeoutMs: this.#usageRequestTimeoutMs,
@@ -5929,15 +5941,9 @@ export class AuthStorage {
 	}
 
 	/**
-	 * Self-heal a stale Codex usage-limit block: when a fresh live usage report
-	 * says the account is allowed and below every reported limit, drop the
-	 * persisted and in-memory `openai-codex:oauth` blocks so credential selection
-	 * can re-include recovered seats before a stale block naturally expires.
-	 */
-	/**
 	 * Narrow a usage report to the limits a backoff scope covers, so a scope is
-	 * judged only by the meters it gates. A legacy scope that meant "block
-	 * everything" keeps the whole report.
+	 * judged only by the meters it gates. A scope the strategy maps to no
+	 * request context (a legacy "block everything" scope) keeps the whole report.
 	 */
 	#scopeUsageReportToBlockScope(
 		report: UsageReport,
@@ -5945,11 +5951,11 @@ export class AuthStorage {
 		strategy: CredentialRankingStrategy | undefined,
 	): UsageReport {
 		if (!blockScope || !strategy?.scopeLimits || !strategy.blockScopes) return report;
-		// Find a request context whose scope set leads with this scope; its scoped
-		// limits are the ones this block gates.
-		const modelId = blockScope === "spark" ? "gpt-5.3-codex-spark" : "gpt-5.3-codex";
-		if (strategy.blockScopes({ modelId })[0] !== blockScope) return report;
-		const scopedLimits = strategy.scopeLimits(report, { modelId });
+		const context = strategy.blockScopeContext?.(blockScope);
+		// The strategy's own request path must file this context under the same
+		// scope, or the narrowed limits would not be the ones the block gates.
+		if (!context || strategy.blockScopes(context)[0] !== blockScope) return report;
+		const scopedLimits = strategy.scopeLimits(report, context);
 		const meterStates = report.metadata?.meterStates;
 		const meterState =
 			meterStates !== null && typeof meterStates === "object"
@@ -5998,37 +6004,43 @@ export class AuthStorage {
 		}
 	}
 
-	#isHealthyCodexUsageReport(report: UsageReport): boolean {
-		if (report.provider !== "openai-codex") return false;
-		const metadata = report.metadata;
-		if (metadata?.allowed !== true || metadata.limitReached !== false) return false;
+	/**
+	 * Whether `provider`'s strategy enumerates the scopes healing may clear.
+	 * Providers without one keep every persisted block until it expires.
+	 */
+	#healsUsageBlocks(strategy: CredentialRankingStrategy | undefined): strategy is UsageBlockHealingStrategy {
+		return strategy?.blockScopes !== undefined;
+	}
+
+	#isHealthyUsageReport(report: UsageReport): boolean {
+		if (report.provider === "openai-codex") {
+			// Codex reports carry the server's own allowed/limitReached verdict;
+			// a report missing it is not evidence of recovery.
+			const metadata = report.metadata;
+			if (metadata?.allowed !== true || metadata.limitReached !== false) return false;
+		}
 		return !this.#isUsageLimitReached(report.limits);
 	}
 
-	#reconcileCodexUsageBlockForCredential(provider: Provider, credentialId: number, report: UsageReport): void {
+	/**
+	 * Self-heal a stale usage-limit block: when a fresh live usage report says
+	 * the account is below every limit a scope gates, drop that scope's
+	 * persisted and in-memory blocks so credential selection re-includes the
+	 * recovered seat before the block naturally expires. Only providers whose
+	 * strategy enumerates its scopes (`blockScopes()`) participate.
+	 */
+	#reconcileUsageBlockForCredential(provider: Provider, credentialId: number, report: UsageReport): void {
+		const strategy = this.#rankingStrategyResolver?.(provider);
+		if (!this.#healsUsageBlocks(strategy)) return;
 		const providerKey = this.#getProviderTypeKey(provider, "oauth");
 		const credentialIndex = this.#getStoredCredentials(provider).findIndex(entry => entry.id === credentialId);
 		if (credentialIndex < 0) return;
-		// Mirror selection: consult the same strategy scope `markUsageLimitReached`
-		// persists under, else a scoped block is invisible here and never healed.
 		// Reconciliation has no request context, so it cannot know which scope a
 		// block was written under. Heal every scope the strategy can produce, plus
 		// any legacy scope it still lists, or a block persisted under one scope
 		// stays invisible here forever.
-		const strategy = this.#rankingStrategyResolver?.(provider);
-		const blockScopes =
-			strategy?.blockScopes?.() ?? [strategy?.blockScope?.({})].filter(scope => scope !== undefined);
-		const scopesToHeal = blockScopes.length > 0 ? blockScopes : [undefined];
-		for (const blockScope of scopesToHeal) {
-			this.#healCodexUsageBlockScope(
-				provider,
-				providerKey,
-				credentialId,
-				credentialIndex,
-				blockScope,
-				report,
-				strategy,
-			);
+		for (const blockScope of strategy.blockScopes()) {
+			this.#healUsageBlockScope(provider, providerKey, credentialId, credentialIndex, blockScope, report, strategy);
 		}
 	}
 
@@ -6040,17 +6052,17 @@ export class AuthStorage {
 	 * would then delete every scope including a block that is still valid. So
 	 * each scope is evaluated against its own limits and cleared on its own.
 	 */
-	#healCodexUsageBlockScope(
+	#healUsageBlockScope(
 		provider: Provider,
 		providerKey: string,
 		credentialId: number,
 		credentialIndex: number,
-		blockScope: string | undefined,
+		blockScope: string,
 		report: UsageReport,
-		strategy: CredentialRankingStrategy | undefined,
+		strategy: CredentialRankingStrategy,
 	): void {
 		const scopedReport = this.#scopeUsageReportToBlockScope(report, blockScope, strategy);
-		if (!this.#isHealthyCodexUsageReport(scopedReport)) return;
+		if (!this.#isHealthyUsageReport(scopedReport)) return;
 		const blockedUntilMs = this.#getCredentialBlockedUntil(provider, providerKey, credentialIndex, blockScope);
 		if (blockedUntilMs === undefined) return;
 		// `/usage` can lag the request path that just returned 429. Fresh local or
@@ -6064,13 +6076,13 @@ export class AuthStorage {
 		const storeScopedProbeAfterMs = this.#readPersistedCredentialBlockReconcileAfter(
 			credentialId,
 			providerKey,
-			blockScope ?? "",
+			blockScope,
 		);
 		if (Math.max(globalProbeAfterMs, scopedProbeAfterMs, storeGlobalProbeAfterMs, storeScopedProbeAfterMs) > nowMs) {
 			return;
 		}
 		this.#clearCredentialBlockScope(provider, credentialId, credentialIndex, providerKey, blockScope);
-		logger.info("Cleared stale Codex usage-limit block after healthy live usage report", {
+		logger.info("Cleared stale usage-limit block after healthy live usage report", {
 			credentialId,
 			provider,
 			blockScope,
@@ -6078,19 +6090,19 @@ export class AuthStorage {
 		});
 	}
 
-	#reconcileCodexUsageBlock(request: UsageRequestDescriptor, report: UsageReport): void {
-		if (request.provider !== "openai-codex") return;
+	#reconcileUsageBlock(request: UsageRequestDescriptor, report: UsageReport): void {
 		const credentialId = this.#findStoredCredentialIdForUsageCredential(request.provider, request.credential);
 		if (credentialId === undefined) return;
-		this.#reconcileCodexUsageBlockForCredential(request.provider, credentialId, report);
+		this.#reconcileUsageBlockForCredential(request.provider, credentialId, report);
 	}
 
 	#findStoredCredentialIdsForUsageReport(report: UsageReport): number[] {
-		if (report.provider !== "openai-codex") return [];
+		if (!this.#healsUsageBlocks(this.#rankingStrategyResolver?.(report.provider))) return [];
 		const email = this.#getUsageReportMetadataValue(report, "email")?.toLowerCase();
 		const accountId = (
 			this.#getUsageReportMetadataValue(report, "accountId") ?? this.#getUsageReportScopeAccountId(report)
 		)?.toLowerCase();
+		const orgId = this.#getUsageReportMetadataValue(report, "orgId")?.toLowerCase();
 		if (!email && !accountId) return [];
 		const matches: number[] = [];
 		for (const entry of this.#getStoredCredentials(report.provider)) {
@@ -6098,26 +6110,29 @@ export class AuthStorage {
 			if (credential.type !== "oauth") continue;
 			const credentialEmail = credential.email?.trim().toLowerCase();
 			const credentialAccountId = credential.accountId?.trim().toLowerCase();
+			const credentialOrgId = credential.orgId?.trim().toLowerCase();
 			// Every identity dimension present on BOTH sides must agree — the
-			// account id is shared workspace-wide and one email can span
-			// workspaces, so a single-dimension match can cross-link siblings.
+			// account id is shared workspace-wide, one email can span workspaces
+			// (ChatGPT) or organizations (Anthropic), so a single-dimension match
+			// can cross-link siblings.
 			const emailComparable = Boolean(email && credentialEmail);
 			const accountComparable = Boolean(accountId && credentialAccountId);
 			if (!emailComparable && !accountComparable) continue;
 			if (emailComparable && credentialEmail !== email) continue;
 			if (accountComparable && credentialAccountId !== accountId) continue;
+			if (orgId && credentialOrgId && credentialOrgId !== orgId) continue;
 			matches.push(entry.id);
 		}
 		return matches;
 	}
 
-	#reconcileCodexUsageBlocksFromReports(reports: UsageReport[]): void {
+	#reconcileUsageBlocksFromReports(reports: UsageReport[]): void {
 		const reconciled = new Set<number>();
 		for (const report of reports) {
 			for (const credentialId of this.#findStoredCredentialIdsForUsageReport(report)) {
 				if (reconciled.has(credentialId)) continue;
 				reconciled.add(credentialId);
-				this.#reconcileCodexUsageBlockForCredential(report.provider, credentialId, report);
+				this.#reconcileUsageBlockForCredential(report.provider, credentialId, report);
 			}
 		}
 	}

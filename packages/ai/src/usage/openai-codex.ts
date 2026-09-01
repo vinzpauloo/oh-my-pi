@@ -598,6 +598,13 @@ export const codexRankingStrategy: CredentialRankingStrategy = {
 		if (!context) return ["chat", "spark", "shared"];
 		return [isCodexSparkRequest(context) ? "spark" : "chat", "shared"];
 	},
+	// Healing judges "chat" by the chat windows and "spark" by the Spark meter;
+	// "shared" meant "block everything", so it is judged by the whole report.
+	blockScopeContext(blockScope) {
+		if (blockScope === "spark") return { modelId: "gpt-5.3-codex-spark" };
+		if (blockScope === "chat") return { modelId: "gpt-5.3-codex" };
+		return undefined;
+	},
 	findWindowLimits(report, context) {
 		const limits = scopeCodexLimitsForRequest(report, context);
 		const findLimit = (key: "primary" | "secondary"): UsageLimit | undefined => {

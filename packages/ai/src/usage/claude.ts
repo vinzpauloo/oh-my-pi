@@ -803,6 +803,23 @@ function findClaudeSecondaryLimit(
 		.reduce<UsageLimit | undefined>((selected, limit) => morePressuredLimit(selected, limit, nowMs), undefined);
 }
 
+/** Model kinds whose weekly caps are metered per tier, so their backoff is scoped. */
+const TIER_SCOPED_KINDS: readonly ClaudeModelKind[] = ["fable", "mythos"];
+
+function claudeTierBlockScope(kind: ClaudeModelKind): string {
+	return `tier:${kind}`;
+}
+
+/**
+ * Fable/Mythos usage-limit errors map to tier-local weekly counters. Scope
+ * reactive backoff blocks for those tiers, mirroring the per-counter
+ * precedent in packages/ai/src/usage/google-antigravity.ts:466-497.
+ */
+function claudeBlockScope(context: CredentialRankingContext | undefined): string | undefined {
+	const kind = getClaudeModelKind(context);
+	return kind !== undefined && TIER_SCOPED_KINDS.includes(kind) ? claudeTierBlockScope(kind) : undefined;
+}
+
 export const claudeRankingStrategy: CredentialRankingStrategy = {
 	findWindowLimits(report, context) {
 		const primary = report.limits.find(limit => limit.id === "anthropic:5h");
@@ -810,14 +827,20 @@ export const claudeRankingStrategy: CredentialRankingStrategy = {
 		return { primary, secondary };
 	},
 	scopeLimits: scopeClaudeLimitsForModelHardBlock,
-	/**
-	 * Fable/Mythos usage-limit errors map to tier-local weekly counters. Scope
-	 * reactive backoff blocks for those tiers, mirroring the per-counter
-	 * precedent in packages/ai/src/usage/google-antigravity.ts:466-497.
-	 */
-	blockScope(context) {
-		const kind = getClaudeModelKind(context);
-		return kind === "fable" || kind === "mythos" ? `tier:${kind}` : undefined;
+	blockScope: claudeBlockScope,
+	// Opus/Sonnet requests back off unscoped, so a request carries at most its
+	// own tier scope; healing (no context) must see every tier scope a 429
+	// could have persisted under.
+	blockScopes(context) {
+		if (!context) return TIER_SCOPED_KINDS.map(claudeTierBlockScope);
+		const scope = claudeBlockScope(context);
+		return scope ? [scope] : [];
+	},
+	// Only the kind matters to `scopeLimits`; the version is a placeholder that
+	// `parseAnthropicModel` requires to classify the id.
+	blockScopeContext(blockScope) {
+		const kind = TIER_SCOPED_KINDS.find(candidate => claudeTierBlockScope(candidate) === blockScope);
+		return kind === undefined ? undefined : { modelId: `claude-${kind}-5` };
 	},
 	windowDefaults: { primaryMs: 5 * 60 * 60 * 1000, secondaryMs: 7 * 24 * 60 * 60 * 1000 },
 };
