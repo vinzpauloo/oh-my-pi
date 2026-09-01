@@ -153,6 +153,10 @@ function expectClaudeMetadataUserId(userId: string | undefined, expectedSessionI
 }
 
 describe("Anthropic request fingerprint alignment", () => {
+	it("advertises the Claude Code version required by Fable 5.1", () => {
+		expect(claudeCodeVersion).toBe("2.1.257");
+	});
+
 	it("maps Stainless arch values from explicit inputs", () => {
 		expect(mapStainlessArch("x64")).toBe("x64");
 		expect(mapStainlessArch("amd64")).toBe("x64");

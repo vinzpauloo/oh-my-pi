@@ -8,8 +8,8 @@
  * provider module.
  */
 
-/** Claude runtime version bundled by the current Cowork desktop release. */
-export const claudeCodeVersion = "2.1.220";
+/** Claude Code version accepted by the current Anthropic OAuth model gate. */
+export const claudeCodeVersion = "2.1.257";
 /** User-Agent emitted by Cowork's `claude-desktop` inference entrypoint. */
 export const coworkUserAgent = `claude-cli/${claudeCodeVersion} (external, claude-desktop)`;
 /** Prefix used to isolate custom Anthropic OAuth tools from built-in tools. */
