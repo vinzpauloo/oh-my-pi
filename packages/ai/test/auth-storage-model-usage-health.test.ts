@@ -278,6 +278,62 @@ describe("AuthStorage model usage health", () => {
 		]);
 	});
 
+	it("uses the default Cursor strategy to isolate Other Models from Cursor Models", async () => {
+		const credential: AuthCredential = {
+			type: "oauth",
+			access: "cursor-access",
+			refresh: "cursor-refresh",
+			expires: Date.now() + 60 * 60_000,
+			accountId: "cursor-account",
+		};
+		const rows: StoredAuthCredential[] = [{ id: 1, provider: "cursor", credential, disabledCause: null }];
+		const usageReport: UsageReport = {
+			provider: "cursor",
+			fetchedAt: Date.now(),
+			limits: [
+				{
+					id: "cursor:usd:individual-auto",
+					label: "Cursor Models",
+					scope: { provider: "cursor" },
+					window: { id: "monthly", label: "Monthly", resetsAt: Date.now() + 60_000 },
+					amount: { usedFraction: 0.2, unit: "percent" },
+					status: "ok",
+				},
+				{
+					id: "cursor:usd:individual-api",
+					label: "Other Models",
+					scope: { provider: "cursor" },
+					window: { id: "monthly", label: "Monthly", resetsAt: Date.now() + 60_000 },
+					amount: { usedFraction: 1, unit: "percent" },
+					status: "exhausted",
+				},
+			],
+		};
+		const usageProvider: UsageProvider = {
+			id: "cursor",
+			fetchUsage: async () => usageReport,
+		};
+		const storage = new AuthStorage(makeStore(rows), {
+			usageProviderResolver: provider => (provider === "cursor" ? usageProvider : undefined),
+			configValueResolver: async value => value,
+		});
+		await storage.reload();
+		storages.push(storage);
+
+		const fableHealth = await storage.getModelUsageHealth("cursor", {
+			modelId: "claude-fable-5-1-xhigh",
+			reserveFraction: 0.1,
+		});
+		const grokHealth = await storage.getModelUsageHealth("cursor", {
+			modelId: "cursor-grok-4.6-xhigh",
+			reserveFraction: 0.1,
+		});
+
+		expect(fableHealth.state).toBe("depleted");
+		expect(grokHealth.state).toBe("healthy");
+		expect(grokHealth.accounts[0]?.remainingFraction).toBeCloseTo(0.8);
+	});
+
 	it("honors persisted scoped blocks without probing blocked accounts", async () => {
 		const resetAt = Date.now() + 60_000;
 		const storage = await createStorage(

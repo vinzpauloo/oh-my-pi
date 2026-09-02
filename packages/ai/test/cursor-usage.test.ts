@@ -1,7 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import { type AuthCredentialStore, AuthStorage } from "../src/auth-storage";
 import type { UsageFetchContext, UsageFetchParams } from "../src/usage";
-import { cursorUsageProvider, parseCursorIndividualUsage, parseCursorUsage } from "../src/usage/cursor";
+import {
+	cursorRankingStrategy,
+	cursorUsageProvider,
+	parseCursorIndividualUsage,
+	parseCursorUsage,
+} from "../src/usage/cursor";
 
 function createCursorAccessToken(sub: string): string {
 	const payload = btoa(JSON.stringify({ sub })).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
@@ -424,6 +429,82 @@ describe("cursor usage provider", () => {
 			} finally {
 				storage.close();
 			}
+		});
+	});
+
+	describe("cursorRankingStrategy", () => {
+		it("scopes Cursor-native and third-party models to independent plan rails", () => {
+			const report = parseCursorIndividualUsage(
+				{
+					individualUsage: {
+						plan: {
+							enabled: true,
+							used: 7000,
+							limit: 7000,
+							remaining: 0,
+							autoPercentUsed: 20,
+							apiPercentUsed: 100,
+						},
+					},
+					billingCycleEnd: "2026-09-21T11:51:59.000Z",
+				},
+				123,
+			);
+			if (!report) throw new Error("expected Cursor usage report");
+
+			expect(
+				cursorRankingStrategy.scopeLimits?.(report, { modelId: "cursor-grok-4.6-xhigh" }).map(limit => limit.id),
+			).toEqual(["cursor:usd:individual-auto"]);
+			expect(
+				cursorRankingStrategy.scopeLimits?.(report, { modelId: "claude-fable-5-1-xhigh" }).map(limit => limit.id),
+			).toEqual(["cursor:usd:individual-api"]);
+			expect(
+				cursorRankingStrategy.findWindowLimits(report, { modelId: "cursor-grok-4.6-xhigh" }).primary?.status,
+			).toBe("ok");
+			expect(
+				cursorRankingStrategy.findWindowLimits(report, { modelId: "claude-fable-5-1-xhigh" }).primary?.status,
+			).toBe("exhausted");
+		});
+
+		it("maps model families to distinct persisted block scopes", () => {
+			expect(cursorRankingStrategy.blockScope?.({ modelId: "default" })).toBe("pool:cursor-models");
+			expect(cursorRankingStrategy.blockScope?.({ modelId: "composer-2.5" })).toBe("pool:cursor-models");
+			expect(cursorRankingStrategy.blockScope?.({ modelId: "cursor-grok-4.6-xhigh" })).toBe("pool:cursor-models");
+			expect(cursorRankingStrategy.blockScope?.({ modelId: "claude-fable-5-1-xhigh" })).toBe("pool:other-models");
+			expect(cursorRankingStrategy.blockScope?.({ modelId: "gpt-5.6-sol-xhigh" })).toBe("pool:other-models");
+			expect(cursorRankingStrategy.blockScope?.()).toBe("pool:unknown");
+			expect(cursorRankingStrategy.blockScopes?.()).toEqual([
+				"pool:cursor-models",
+				"pool:other-models",
+				"pool:unknown",
+			]);
+			expect(cursorRankingStrategy.blockScopeContext?.("pool:cursor-models")).toEqual({
+				modelId: "cursor-grok-4.6-xhigh",
+			});
+			expect(cursorRankingStrategy.blockScopeContext?.("pool:other-models")).toEqual({
+				modelId: "claude-fable-5-1-xhigh",
+			});
+		});
+
+		it("falls back to a shared legacy plan meter when split rails are absent", () => {
+			const report = parseCursorIndividualUsage({
+				individualUsage: {
+					overall: {
+						enabled: true,
+						used: 5000,
+						limit: 10000,
+						remaining: 5000,
+					},
+				},
+			});
+			if (!report) throw new Error("expected Cursor usage report");
+
+			expect(
+				cursorRankingStrategy.scopeLimits?.(report, { modelId: "cursor-grok-4.6-xhigh" }).map(limit => limit.id),
+			).toEqual(["cursor:usd:individual-overall"]);
+			expect(
+				cursorRankingStrategy.scopeLimits?.(report, { modelId: "claude-fable-5-1-xhigh" }).map(limit => limit.id),
+			).toEqual(["cursor:usd:individual-overall"]);
 		});
 	});
 

@@ -1,6 +1,8 @@
 import { toNumber } from "@oh-my-pi/pi-catalog/utils";
 import { extractCursorAccessTokenUserId } from "../registry/oauth/cursor";
 import type {
+	CredentialRankingContext,
+	CredentialRankingStrategy,
 	UsageAmount,
 	UsageFetchContext,
 	UsageFetchParams,
@@ -344,6 +346,78 @@ export function parseCursorUsage(payload: unknown, fetchedAt = Date.now()): Usag
 		raw: payload,
 	};
 }
+
+type CursorUsagePool = "cursor-models" | "other-models";
+
+const CURSOR_MODELS_SCOPE = "pool:cursor-models";
+const OTHER_MODELS_SCOPE = "pool:other-models";
+const UNKNOWN_MODELS_SCOPE = "pool:unknown";
+const CURSOR_MODELS_LIMIT_ID = "cursor:usd:individual-auto";
+const OTHER_MODELS_LIMIT_ID = "cursor:usd:individual-api";
+const SHARED_PLAN_LIMIT_IDS: Record<string, true> = {
+	"cursor:usd:individual-plan": true,
+	"cursor:usd:individual-overall": true,
+	"cursor:usd:planusage": true,
+};
+const BLOCK_SCOPE_BY_POOL: Record<CursorUsagePool, string> = {
+	"cursor-models": CURSOR_MODELS_SCOPE,
+	"other-models": OTHER_MODELS_SCOPE,
+};
+const MONTH_MS = 30 * 24 * 60 * 60_000;
+
+function cursorUsagePool(context: CredentialRankingContext | undefined): CursorUsagePool | undefined {
+	const modelId = context?.modelId?.toLowerCase();
+	if (!modelId) return undefined;
+	if (
+		modelId === "default" ||
+		modelId === "auto" ||
+		modelId === "auto-smart" ||
+		modelId.startsWith("composer-") ||
+		modelId.startsWith("cursor-grok-")
+	) {
+		return "cursor-models";
+	}
+	return "other-models";
+}
+
+function scopeCursorLimits(report: UsageReport, context: CredentialRankingContext | undefined): UsageLimit[] {
+	const pool = cursorUsagePool(context);
+	if (!pool) return [];
+
+	const poolLimitId = pool === "cursor-models" ? CURSOR_MODELS_LIMIT_ID : OTHER_MODELS_LIMIT_ID;
+	const poolLimits = report.limits.filter(limit => limit.id.toLowerCase() === poolLimitId);
+	if (poolLimits.length > 0) return poolLimits;
+
+	const modelId = context?.modelId?.toLowerCase();
+	const legacyModelLimits = modelId
+		? report.limits.filter(limit => limit.id.toLowerCase() === `cursor:requests:${modelId}`)
+		: [];
+	if (legacyModelLimits.length > 0) return legacyModelLimits;
+
+	return report.limits.filter(limit => SHARED_PLAN_LIMIT_IDS[limit.id.toLowerCase()] === true);
+}
+
+export const cursorRankingStrategy: CredentialRankingStrategy = {
+	findWindowLimits(report, context) {
+		return { primary: scopeCursorLimits(report, context)[0] };
+	},
+	scopeLimits: scopeCursorLimits,
+	blockScope(context) {
+		const pool = cursorUsagePool(context);
+		return pool ? BLOCK_SCOPE_BY_POOL[pool] : UNKNOWN_MODELS_SCOPE;
+	},
+	blockScopes(context) {
+		if (!context) return [CURSOR_MODELS_SCOPE, OTHER_MODELS_SCOPE, UNKNOWN_MODELS_SCOPE];
+		const pool = cursorUsagePool(context);
+		return [pool ? BLOCK_SCOPE_BY_POOL[pool] : UNKNOWN_MODELS_SCOPE];
+	},
+	blockScopeContext(blockScope) {
+		if (blockScope === CURSOR_MODELS_SCOPE) return { modelId: "cursor-grok-4.6-xhigh" };
+		if (blockScope === OTHER_MODELS_SCOPE) return { modelId: "claude-fable-5-1-xhigh" };
+		return undefined;
+	},
+	windowDefaults: { primaryMs: MONTH_MS, secondaryMs: MONTH_MS },
+};
 
 export const cursorUsageProvider: UsageProvider = {
 	id: "cursor",

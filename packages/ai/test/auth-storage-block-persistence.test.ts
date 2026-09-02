@@ -10,6 +10,8 @@ const PROVIDER = "anthropic";
 const PROVIDER_KEY = "anthropic:oauth";
 const CODEX_PROVIDER = "openai-codex";
 const CODEX_PROVIDER_KEY = "openai-codex:oauth";
+const CURSOR_PROVIDER = "cursor";
+const CURSOR_PROVIDER_KEY = "cursor:oauth";
 const FUTURE_BLOCK_MS = 1_899_999_999_000;
 const EXPIRED_BLOCK_MS = 1;
 const LEGACY_TIMESTAMP = 1_700_000_000;
@@ -163,6 +165,53 @@ describe("AuthStorage credential block persistence", () => {
 			expect(fableKey).toBe("access-3");
 		} finally {
 			reopenedStorage.close();
+		}
+	});
+
+	it("persists Cursor pool blocks independently", async () => {
+		const store = await SqliteAuthCredentialStore.open(dbPath);
+		store.saveOAuth(CURSOR_PROVIDER, oauthCredential("cursor"));
+		const [row] = store.listAuthCredentials(CURSOR_PROVIDER);
+		if (!row) throw new Error("expected Cursor credential row");
+		const storage = new AuthStorage(store, {
+			usageProviderResolver: () => undefined,
+		});
+		await storage.reload();
+		try {
+			await storage.markUsageLimitReached(CURSOR_PROVIDER, "cursor-fable-session", {
+				credentialId: row.id,
+				modelId: "claude-fable-5-1-xhigh",
+			});
+
+			expect(readCredentialBlockRows(dbPath)).toEqual([
+				expect.objectContaining({
+					credential_id: row.id,
+					provider_key: CURSOR_PROVIDER_KEY,
+					block_scope: "pool:other-models",
+				}),
+			]);
+
+			const fableHealth = await storage.getModelUsageHealth(CURSOR_PROVIDER, {
+				modelId: "claude-fable-5-1-xhigh",
+				reserveFraction: 0.1,
+			});
+			const grokHealth = await storage.getModelUsageHealth(CURSOR_PROVIDER, {
+				modelId: "cursor-grok-4.6-xhigh",
+				reserveFraction: 0.1,
+			});
+			expect(fableHealth.state).toBe("depleted");
+			expect(grokHealth.state).toBe("unknown");
+
+			await storage.markUsageLimitReached(CURSOR_PROVIDER, "cursor-grok-session", {
+				credentialId: row.id,
+				modelId: "cursor-grok-4.6-xhigh",
+			});
+			expect(readCredentialBlockRows(dbPath).map(block => block.block_scope)).toEqual([
+				"pool:cursor-models",
+				"pool:other-models",
+			]);
+		} finally {
+			storage.close();
 		}
 	});
 
