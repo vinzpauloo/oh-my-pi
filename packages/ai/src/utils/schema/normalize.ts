@@ -197,6 +197,18 @@ function isGoogleUnsupportedSchemaField(key: string): boolean {
 	return Object.hasOwn(UNSUPPORTED_SCHEMA_FIELDS, key);
 }
 
+/**
+ * Cloud Code Assist deserializes `FunctionDeclaration.parameters` into a protobuf
+ * `Schema`, and ProtoJSON rejects unknown fields outright — so any vendor extension
+ * keyword that is perfectly legal JSON Schema (2020-12 §4.3.1: unknown keywords are
+ * annotations) fails the whole request with `Unknown name "…": Cannot find field`.
+ * MCP servers legitimately emit such keys; `x-mcp-header` (SEP-2243) is one.
+ * Strip the `x-` extension namespace on top of the shared Google denylist.
+ */
+function isCcaUnsupportedSchemaField(key: string): boolean {
+	return isGoogleUnsupportedSchemaField(key) || key.startsWith("x-");
+}
+
 function isMcpUnsupportedSchemaField(key: string): boolean {
 	return key === "$schema";
 }
@@ -1119,7 +1131,7 @@ export function normalizeSchemaForGoogle(value: unknown): unknown {
 export function normalizeSchemaForCCA(value: unknown): unknown {
 	return normalizeSchema(value, {
 		coerceBooleanSubschemas: "standard",
-		unsupportedFields: isGoogleUnsupportedSchemaField,
+		unsupportedFields: isCcaUnsupportedSchemaField,
 		normalizeFieldNames: true,
 		collapseNullFields: false,
 		normalizeTypeArrayToNullable: true,

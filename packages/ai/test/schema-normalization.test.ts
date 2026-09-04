@@ -199,6 +199,64 @@ describe("upgradeJsonSchemaTo202012", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Cloud Code Assist vendor extension keys
+// ---------------------------------------------------------------------------
+
+describe("normalizeSchemaForCCA vendor extension keys", () => {
+	// Cloud Code Assist parses `parameters` as a protobuf Schema, so an unknown
+	// field 400s the whole request. GitHub's MCP server annotates owner/repo with
+	// `x-mcp-header` (SEP-2243), which is legal JSON Schema but fatal here.
+	const githubStyleSchema = {
+		type: "object",
+		properties: {
+			owner: { type: "string", "x-mcp-header": "owner" },
+			repo: { type: "string", "x-mcp-header": "repo" },
+			pullNumber: { type: "number" },
+		},
+		required: ["owner", "repo"],
+	};
+
+	it("strips x- extension keys from nested property schemas", () => {
+		const sanitized = normalizeSchemaForCCA(githubStyleSchema) as {
+			properties: Record<string, Record<string, unknown>>;
+		};
+
+		expect(sanitized.properties.owner).toEqual({ type: "string" });
+		expect(sanitized.properties.repo).toEqual({ type: "string" });
+		expect(sanitized.properties.pullNumber).toEqual({ type: "number" });
+		expect(JSON.stringify(sanitized)).not.toContain("x-mcp-header");
+	});
+
+	it("does not spill the stripped extension into description", () => {
+		const sanitized = normalizeSchemaForCCA({
+			type: "string",
+			description: "The repository owner",
+			"x-mcp-header": "owner",
+		}) as Record<string, unknown>;
+
+		expect(sanitized.description).toBe("The repository owner");
+		expect(sanitized["x-mcp-header"]).toBeUndefined();
+	});
+
+	it("keeps a legitimate parameter whose NAME is x-mcp-header", () => {
+		const sanitized = normalizeSchemaForCCA({
+			type: "object",
+			properties: { "x-mcp-header": { type: "string" } },
+		}) as { properties: Record<string, unknown> };
+
+		expect(sanitized.properties["x-mcp-header"]).toEqual({ type: "string" });
+	});
+
+	it("leaves the Google JSON-Schema path untouched", () => {
+		const sanitized = normalizeSchemaForGoogle(githubStyleSchema) as {
+			properties: Record<string, Record<string, unknown>>;
+		};
+
+		expect(sanitized.properties.owner["x-mcp-header"]).toBe("owner");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // normalizeSchemaForGoogle
 // ---------------------------------------------------------------------------
 
