@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Update Codex discovery and inference compatibility version to 0.153.3 so GPT-6 Astra is discoverable and accepted by the Codex backend.
+
 ## [17.3.6] - 2026-08-17
 
 ### Changed
