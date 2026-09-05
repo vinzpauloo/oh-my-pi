@@ -20,7 +20,7 @@ export const UNSUPPORTED_SCHEMA_FIELDS: Record<string, true> = {
 	$dynamicRef: true,
 	$dynamicAnchor: true,
 	examples: true,
-	prefixItems: true,
+	prefixItems: true, // Nonempty tuples are translated to items before stripping on Google/CCA.
 	unevaluatedProperties: true,
 	unevaluatedItems: true,
 	patternProperties: true,

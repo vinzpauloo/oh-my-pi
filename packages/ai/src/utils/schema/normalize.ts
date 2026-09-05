@@ -55,6 +55,7 @@ export interface NormalizeSchemaOptions {
 	foldOneOfIntoAnyOf: boolean;
 	dropNonScalarEnum: boolean;
 	stringEnumsOnly?: boolean;
+	normalizeTupleItems?: boolean;
 	rejectResidualIncompatibilities?: ReadonlyArray<ResidualSchemaIncompatibility>;
 	validateAndFallback?: { fallback: unknown };
 }
@@ -352,6 +353,25 @@ function applyDescriptionSpill(
 	spillToDescription(result, spill, lift.format ?? "spill");
 }
 
+function normalizeGoogleTupleItems(schema: JsonObject): JsonObject {
+	const prefixItems = schema.prefixItems;
+	if (!Array.isArray(prefixItems) || prefixItems.length === 0) return schema;
+	// A tuple's `items` constrains only its tail, not the positional entries.
+	const variants = isJsonObject(schema.items) ? [...prefixItems, schema.items] : prefixItems;
+	return { ...schema, items: { anyOf: variants } };
+}
+
+function mergeNormalizedGoogleTupleItems(schema: unknown, options: NormalizeSchemaWalkOptions): unknown {
+	if (!isJsonObject(schema) || !Array.isArray(schema.anyOf) || schema.anyOf.length === 0) return schema;
+	// The normal walker has cut schema backedges and processed nullable unions before equality.
+	let items = schema.anyOf[0];
+	for (let i = 1; i < schema.anyOf.length; i++) {
+		items = mergePropertySchemas(items, schema.anyOf[i]);
+	}
+	if (!isJsonObject(items)) return schema;
+	return applyNodePostProcessing({ ...items, ...copySchemaWithout(schema, "anyOf") }, options);
+}
+
 function normalizeSchemaNode(value: unknown, options: NormalizeSchemaWalkOptions): unknown {
 	if (Array.isArray(value)) {
 		if (!enter(value)) return [];
@@ -387,6 +407,12 @@ function normalizeSchemaObjectNode(value: JsonObject, options: NormalizeSchemaWa
 	let obj = options.normalizeFieldNames && !options.insideSchemaMap ? applySnakeCaseRenames(value) : value;
 	if (options.collapseNullFields && !options.insideSchemaMap) {
 		obj = preHandleNullFields(obj);
+	}
+	let tupleItemsConverted = false;
+	if (options.normalizeTupleItems && !options.insideSchemaMap) {
+		const tupleSchema = normalizeGoogleTupleItems(obj);
+		tupleItemsConverted = tupleSchema !== obj;
+		obj = tupleSchema;
 	}
 	const result: JsonObject = {};
 	let spill: Array<[string, unknown]> | undefined;
@@ -454,6 +480,7 @@ function normalizeSchemaObjectNode(value: JsonObject, options: NormalizeSchemaWa
 					})
 				: entry;
 		}
+		if (tupleItemsConverted) result.items = mergeNormalizedGoogleTupleItems(result.items, options);
 		applyDescriptionSpill(result, spill, options);
 		return applyNodePostProcessing(result, options);
 	}
@@ -543,6 +570,7 @@ function normalizeSchemaObjectNode(value: JsonObject, options: NormalizeSchemaWa
 		result.properties = {};
 	}
 
+	if (tupleItemsConverted) result.items = mergeNormalizedGoogleTupleItems(result.items, options);
 	applyDescriptionSpill(result, spill, options);
 	return applyNodePostProcessing(result, options);
 }
@@ -1124,6 +1152,7 @@ export function normalizeSchemaForGoogle(value: unknown): unknown {
 		inferTypeForBareEnum: true,
 		dropNonScalarEnum: false,
 		stringEnumsOnly: true,
+		normalizeTupleItems: true,
 		foldOneOfIntoAnyOf: false,
 	});
 }
@@ -1146,6 +1175,7 @@ export function normalizeSchemaForCCA(value: unknown): unknown {
 		extractNullableFromUnions: true,
 		inferTypeForBareEnum: true,
 		dropNonScalarEnum: false,
+		normalizeTupleItems: true,
 		foldOneOfIntoAnyOf: false,
 		rejectResidualIncompatibilities: ["type-array", "type-null", "nullable", "combiners", "not"],
 		validateAndFallback: { fallback: CLOUD_CODE_ASSIST_CLAUDE_FALLBACK_SCHEMA },

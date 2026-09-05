@@ -9,6 +9,7 @@ interface CapturedPayload {
 		thinkingConfig?: {
 			includeThoughts?: boolean;
 			thinkingBudget?: number;
+			thinkingLevel?: string;
 		};
 	};
 }
@@ -34,12 +35,15 @@ const model: Model<"google-generative-ai"> = buildModel({
 	maxTokens: 65_536,
 });
 
-async function capturePayload(flag: "disableReasoning" | "forceReasoningOff"): Promise<CapturedPayload> {
+async function capturePayload(
+	flag: "disableReasoning" | "forceReasoningOff",
+	target: Model<"google-generative-ai"> = model,
+): Promise<CapturedPayload> {
 	let captured: CapturedPayload | undefined;
 	const fetchMock: FetchImpl = async () =>
 		new Response("", { status: 200, headers: { "content-type": "text/event-stream" } });
 
-	await streamSimple(model, context, {
+	await streamSimple(target, context, {
 		apiKey: "test-key",
 		reasoning: Effort.High,
 		[flag]: true,
@@ -62,6 +66,14 @@ describe("Google reasoning disablement", () => {
 				includeThoughts: false,
 				thinkingBudget: 0,
 			});
+		});
+		it(`preserves native Google Flash MINIMAL for ${flag}`, async () => {
+			const payload = await capturePayload(
+				flag,
+				buildModel({ ...model, id: "gemini-3.8-flash", thinking: undefined }),
+			);
+			expect(payload.config?.thinkingConfig?.thinkingLevel).toBe("MINIMAL");
+			expect(payload.config?.thinkingConfig?.thinkingBudget).toBeUndefined();
 		});
 	}
 });

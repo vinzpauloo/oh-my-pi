@@ -360,6 +360,58 @@ describe("model thinking derivation", () => {
 		expect(() => requireSupportedEffort(model, Effort.Medium)).toThrow(/not supported/);
 	});
 
+	it("normalizes fresh and cached Antigravity Gemini 3 Flash thinking to its supported floor", () => {
+		for (const id of ["gemini-3.7-flash", "gemini-3.8-flash-high"]) {
+			for (const thinking of [
+				undefined,
+				{
+					mode: "google-level" as const,
+					efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
+					requiresEffort: true,
+				},
+			]) {
+				const model = createModel({ id, api: "google-gemini-cli", provider: "google-antigravity", thinking });
+				expect(model.thinking).toEqual({
+					mode: "google-level",
+					efforts: [Effort.Low, Effort.Medium, Effort.High],
+					requiresEffort: true,
+				});
+				expect(minimumSupportedEffort(model)).toBe(Effort.Low);
+				expect(requireSupportedEffort(model, Effort.High)).toBe(Effort.High);
+				expect(() => requireSupportedEffort(model, Effort.Minimal)).toThrow(/Supported efforts: low, medium, high/);
+			}
+		}
+	});
+
+	it("preserves minimal effort outside the Antigravity Gemini 3 Flash route", () => {
+		for (const [provider, api, id] of [
+			["google", "google-generative-ai", "gemini-3.8-flash"],
+			["google-vertex", "google-vertex", "gemini-3.8-flash"],
+			["google-gemini-cli", "google-gemini-cli", "gemini-3.8-flash"],
+			["google-antigravity", "google-gemini-cli", "gemini-2.5-flash"],
+		] as const) {
+			const model = createModel({ id, api, provider });
+			expect(minimumSupportedEffort(model)).toBe(Effort.Minimal);
+			expect(requireSupportedEffort(model, Effort.High)).toBe(Effort.High);
+		}
+	});
+
+	it("preserves Antigravity Flash budget-mode efforts", () => {
+		const model = createModel({
+			id: "gemini-3.5-flash",
+			api: "google-gemini-cli",
+			provider: "google-antigravity",
+			thinking: {
+				mode: "budget",
+				efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
+				effortBudgets: { minimal: 1000, low: 1000, medium: 4000, high: 10000 },
+			},
+		});
+		expect(minimumSupportedEffort(model)).toBe(Effort.Minimal);
+		expect(model.thinking?.mode).toBe("budget");
+		expect(model.thinking?.effortBudgets?.minimal).toBe(1000);
+	});
+
 	it("bakes requiresEffort for Gemini 3.x on any provider and backfills explicit metadata", () => {
 		// Derivation: aggregator-hosted Gemini 3.5 gets the flag, 2.5 does not.
 		const openRouterFlash = createModel({

@@ -11,6 +11,7 @@ interface GeminiCliThinkingConfig {
 }
 
 interface CapturedRequestBody {
+	model?: string;
 	request?: {
 		generationConfig?: {
 			thinkingConfig?: GeminiCliThinkingConfig;
@@ -119,6 +120,67 @@ describe("google-gemini-cli Gemini 3.x thinking mapping", () => {
 		const thinking = extractThinking(requestBody);
 		expect(thinking?.thinkingLevel).toBe("MEDIUM");
 		expect(thinking?.thinkingBudget).toBeUndefined();
+	});
+
+	for (const id of ["gemini-3.7-flash", "gemini-3.8-flash-high"]) {
+		for (const flag of [undefined, "disableReasoning", "forceReasoningOff"] as const) {
+			it(`uses LOW for ${id} on Antigravity with ${flag ?? "reasoning omitted"}`, async () => {
+				let requestBody: string | undefined;
+				const model = buildModel({
+					...createModel(id),
+					provider: "google-antigravity",
+					thinking: {
+						mode: "google-level",
+						efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
+						requiresEffort: true,
+						...(id === "gemini-3.7-flash"
+							? {
+									effortRouting: {
+										minimal: `${id}-low`,
+										low: `${id}-low`,
+										medium: `${id}-medium`,
+										high: `${id}-high`,
+									},
+								}
+							: {}),
+					},
+				});
+				const fetchMock = createFetchMock(body => {
+					requestBody = body;
+				});
+				const options = {
+					apiKey: JSON.stringify({ token: "token", projectId: "proj-123" }),
+					fetch: fetchMock,
+				};
+				await streamSimple(model, context, {
+					...options,
+					...(flag ? { reasoning: Effort.High, [flag]: true } : {}),
+				}).result();
+				expect(extractThinking(requestBody)?.thinkingLevel).toBe("LOW");
+				expect(extractThinking(requestBody)?.thinkingBudget).toBeUndefined();
+				expect((JSON.parse(requestBody!) as CapturedRequestBody).model).toBe(
+					id === "gemini-3.7-flash" ? `${id}-low` : id,
+				);
+
+				await streamSimple(model, context, { ...options, reasoning: Effort.High }).result();
+				expect(extractThinking(requestBody)?.thinkingLevel).toBe("HIGH");
+				expect((JSON.parse(requestBody!) as CapturedRequestBody).model).toBe(
+					id === "gemini-3.7-flash" ? `${id}-high` : id,
+				);
+			});
+		}
+	}
+
+	it("preserves MINIMAL for non-Antigravity Flash reasoning-off requests", async () => {
+		let requestBody: string | undefined;
+		await streamSimple(createModel("gemini-3.8-flash"), context, {
+			apiKey: JSON.stringify({ token: "token", projectId: "proj-123" }),
+			disableReasoning: true,
+			fetch: createFetchMock(body => {
+				requestBody = body;
+			}),
+		}).result();
+		expect(extractThinking(requestBody)?.thinkingLevel).toBe("MINIMAL");
 	});
 
 	it("keeps thinkingBudget for gemini-2.5-pro", async () => {

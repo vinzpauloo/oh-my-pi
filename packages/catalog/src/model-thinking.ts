@@ -315,6 +315,18 @@ function getModelDefinedEfforts<TApi extends Api>(
 	spec: ModelSpec<TApi>,
 	compat: CompatOf<TApi>,
 ): readonly Effort[] | undefined {
+	if (spec.provider === "google-antigravity" && spec.api === "google-gemini-cli") {
+		const parsed = parseKnownModel(spec.id);
+		if (
+			parsed.family === "gemini" &&
+			parsed.version.major === 3 &&
+			parsed.kind === "flash" &&
+			(spec.thinking?.mode ?? inferThinkingControlMode(spec, parsed)) === "google-level"
+		) {
+			// Antigravity rejects MINIMAL even though native Google Flash accepts it.
+			return LOW_MEDIUM_HIGH_REASONING_EFFORTS;
+		}
+	}
 	if (isGlm53ReasoningEffortModelId(spec.id)) {
 		// GLM-5.3+ exposes a uniform wire-exact low/high/max ladder on every
 		// host — unlike GLM-5.2, whose reasoning_effort dialect is

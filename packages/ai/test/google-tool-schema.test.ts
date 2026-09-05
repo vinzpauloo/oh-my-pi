@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { convertTools } from "@oh-my-pi/pi-ai/providers/google-shared";
 import type { Model, TJsonSchema, Tool } from "@oh-my-pi/pi-ai/types";
-import { normalizeSchemaForCCA, normalizeSchemaForGoogle } from "@oh-my-pi/pi-ai/utils/schema";
+import { normalizeSchemaForCCA, normalizeSchemaForGoogle, normalizeSchemaForMCP } from "@oh-my-pi/pi-ai/utils/schema";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 
 function createModel(id: string): Model<"google-gemini-cli"> {
@@ -23,6 +23,159 @@ function createModel(id: string): Model<"google-gemini-cli"> {
 		maxTokens: 8192,
 	});
 }
+
+describe("Google tuple item normalization", () => {
+	it.each([
+		["claude-sonnet-4-5", "parameters"],
+		["gemini-2.5-pro", "parametersJsonSchema"],
+	])("preserves nested numeric transform tuples for %s", (modelId, field) => {
+		const parameters = {
+			type: "object",
+			properties: {
+				transform: {
+					type: "object",
+					properties: {
+						position: {
+							type: "array",
+							prefixItems: [{ type: "number" }, { type: "number" }, { type: "number" }],
+							default: [0, 0, 0],
+						},
+						rotation: {
+							type: "array",
+							items: [{ type: "number" }, { type: "number" }, { type: "number" }],
+							additionalItems: false,
+							default: [0, 0, 0],
+						},
+						scale: {
+							type: "array",
+							prefixItems: [{ type: "number" }, { type: "number" }, { type: "number" }],
+							items: false,
+							default: [1, 1, 1],
+						},
+					},
+				},
+			},
+		} as unknown as TJsonSchema;
+		const tools: Tool[] = [
+			{ name: "mcp__higgsfield_scene_builder_d_import_asset", description: "Import", parameters },
+		];
+		const declaration = convertTools(tools, createModel(modelId))?.[0]?.functionDeclarations[0] as Record<
+			string,
+			unknown
+		>;
+		const schema = declaration[field] as {
+			properties: { transform: { properties: Record<string, unknown> } };
+		};
+		for (const name of ["position", "rotation", "scale"]) {
+			expect(schema.properties.transform.properties[name]).toEqual({
+				type: "array",
+				items: { type: "number" },
+				default: name === "scale" ? [1, 1, 1] : [0, 0, 0],
+			});
+		}
+		expect(declaration[field === "parameters" ? "parametersJsonSchema" : "parameters"]).toBeUndefined();
+	});
+
+	it("keeps mixed tuple alternatives for Gemini and uses existing CCA first-type collapse", () => {
+		const schema = {
+			type: "array",
+			prefixItems: [{ type: "number" }, { type: "string" }, { type: "number" }],
+			items: false,
+		};
+		expect(normalizeSchemaForGoogle(schema)).toEqual({
+			type: "array",
+			items: { anyOf: [{ type: "number" }, { type: "string" }] },
+		});
+		expect(normalizeSchemaForCCA(schema)).toEqual({ type: "array", items: { type: "number" } });
+	});
+
+	it("processes nullable tuple unions before normalizing their individual entries", () => {
+		for (const prefixItems of [
+			[{ type: "number" }, { type: "null" }],
+			[{ type: "null" }, { type: "number" }],
+		]) {
+			const schema = { type: "array", prefixItems, items: false };
+			expect(normalizeSchemaForGoogle(schema)).toEqual({
+				type: "array",
+				items: { type: "number", nullable: true },
+			});
+			expect(normalizeSchemaForCCA(schema)).toEqual({ type: "array", items: { type: "number" } });
+		}
+	});
+
+	it("includes an explicitly typed tail without replacing positional item types", () => {
+		const schema = {
+			type: "array",
+			prefixItems: [{ type: "number" }, { type: "number" }],
+			items: { type: "string" },
+		};
+		expect(normalizeSchemaForGoogle(schema)).toEqual({
+			type: "array",
+			items: { anyOf: [{ type: "number" }, { type: "string" }] },
+		});
+		expect(normalizeSchemaForCCA(schema)).toEqual({ type: "array", items: { type: "number" } });
+	});
+
+	for (const normalize of [normalizeSchemaForGoogle, normalizeSchemaForCCA]) {
+		it(`${normalize.name} preserves homogeneous arrays and nested tuple arrays`, () => {
+			const homogeneous = { type: "array", items: { type: "number" }, default: [0, 1] };
+			expect(normalize(homogeneous)).toEqual(homogeneous);
+			expect(
+				normalize({
+					type: "array",
+					items: { type: "array", prefixItems: [{ type: "number" }, { type: "number" }] },
+				}),
+			).toEqual({ type: "array", items: { type: "array", items: { type: "number" } } });
+		});
+
+		it(`${normalize.name} cuts distinct tuple schema cycles before comparing items`, () => {
+			const first: { type: string; properties: Record<string, unknown> } = { type: "object", properties: {} };
+			const second: { type: string; properties: Record<string, unknown> } = { type: "object", properties: {} };
+			first.properties.self = first;
+			second.properties.self = second;
+			const expected = { type: "array", items: { type: "object", properties: { self: {} } } };
+			expect(normalize({ type: "array", prefixItems: [first, second] })).toEqual(expected);
+			expect(normalize({ type: "array", prefixItems: [first], items: second })).toEqual(expected);
+			expect(normalize({ type: "array", prefixItems: [first, first] })).toEqual(expected);
+			expect(first.properties.self).toBe(first);
+			expect(second.properties.self).toBe(second);
+		});
+
+		it(`${normalize.name} does not invent types for empty or unconstrained arrays from defaults`, () => {
+			expect(normalize({ type: "array", default: [0, 0, 0] })).toEqual({
+				type: "array",
+				default: [0, 0, 0],
+			});
+			for (const items of [{}, true]) {
+				expect(normalize({ type: "array", items, default: [0, 0, 0] })).toEqual({
+					type: "array",
+					items: {},
+					default: [0, 0, 0],
+				});
+			}
+			expect(normalize({ type: "array", prefixItems: [], default: [] })).toEqual({
+				type: "array",
+				default: [],
+			});
+		});
+
+		it(`${normalize.name} leaves instance payloads and properties named prefixItems opaque`, () => {
+			const value = { type: "array", prefixItems: [{ type: "number" }] };
+			const schema = { type: "object", properties: { prefixItems: { type: "string" } }, default: value };
+			expect(normalize(schema)).toEqual(schema);
+		});
+	}
+
+	it("preserves positional tuples and closed tails for non-Google MCP normalization", () => {
+		const schema = {
+			type: "array",
+			prefixItems: [{ type: "number" }, { type: "string" }],
+			items: false,
+			default: [1, "x"],
+		};
+		expect(normalizeSchemaForMCP(schema)).toEqual(schema);
+	});
+});
 
 describe("Cloud Code Assist Claude tool schema conversion", () => {
 	it("strips nullable keyword and collapses type arrays for CCA Claude", () => {
